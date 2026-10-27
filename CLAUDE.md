@@ -13,6 +13,7 @@ uv run ruff check . && uv run ruff format --check .   # lint + format check
 uv run ruff format .                      # format
 uv run python scripts/make_sample_data.py # generate the synthetic demo field into sample_data/
 uv run python scripts/screenshot.py       # offscreen screenshot -> screenshots/main_window.png
+uv run python scripts/screenshot.py out.png --demo   # same, with the sample field loaded
 ```
 
 ## Stack
@@ -41,6 +42,15 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
 - Raster reads are stateless: each call opens and closes the file, so they are safe from worker
   threads. `read_raster_view` never upsamples beyond native resolution, and warps with a
   `WarpedVRT` when the raster CRS differs from the project CRS.
+- UI wiring: `ui/project_bridge.py` turns Project events into Qt signals. `ui/map_controller.py`
+  keeps the canvas in sync with the project and schedules raster re-reads on (debounced)
+  `view_changed`. Superseded raster results are dropped by a per-layer token. `ui/layer_panel.py`
+  writes user edits (visibility, rename, drag order) to the project and redraws from events.
+- Background work goes through `ui/workers.TaskRunner.submit(fn, *args, on_result=, on_error=)`.
+  Callbacks run on the UI thread. Load functions in io/ must be pure and thread-safe.
+- Map canvas: each vector layer is drawn with 3 pyqtgraph items (polygon rings, lines, points),
+  whatever its feature count. Rasters use one ImageItem fed by `read_raster_view`. In-layer z order
+  is rings < lines < points.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

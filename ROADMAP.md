@@ -8,7 +8,7 @@
       anticline structure-top GeoTIFF, all in UTM 39N
 - [x] M2 — Core + IO: Project, layers, styles, CRS reprojection, NaN-path geometry, vector readers
       (SHP/GeoJSON/GPKG/KML), downsampled raster reads
-- [ ] M3 — Map canvas: pan, wheel/box zoom, zoom to layer/extent, cursor coords; layer panel
+- [x] M3 — Map canvas: pan, wheel/box zoom, zoom to layer/extent, cursor coords; layer panel
       (visibility, reorder, rename, remove); vector + raster rendering and style dialogs; background loading
 - [ ] M4 — Wells: CSV/Excel header import, column auto-detection, mapping dialog, symbols + LOD labels
 - [ ] M5 — LAS logs: batch import, name matching, mnemonic aliases, log viewer dock

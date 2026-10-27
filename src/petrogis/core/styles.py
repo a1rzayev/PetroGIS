@@ -9,6 +9,8 @@ from typing import Any, Self
 COLORMAPS = ("viridis", "plasma", "inferno", "magma", "cividis", "turbo", "gray")
 POINT_SYMBOLS = ("o", "s", "t", "d", "+", "x")
 _HEX_COLOR = re.compile(r"^#[0-9a-fA-F]{6}$")
+VECTOR_PALETTE = ("#e41a1c", "#000000", "#ff7f00", "#f781bf", "#984ea3", "#a65628", "#377eb8")
+"""Default colours for new vector layers, picked to stand out on the raster colormaps."""
 
 
 def _check_color(value: str) -> None:
