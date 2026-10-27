@@ -59,6 +59,9 @@ def main() -> int:
     install_excepthook()
     window = MainWindow()
     window.show()
+    project_args = [arg for arg in app.arguments()[1:] if arg.lower().endswith(".pgis")]
+    if project_args:
+        window.open_project(project_args[0])
     return app.exec()
 
 

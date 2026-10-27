@@ -8,6 +8,7 @@ subsurface data. It is not a QGIS clone.
 ```bash
 uv sync                                   # install (creates .venv, Python pinned in .python-version)
 uv run petrogis                           # run the app
+uv run petrogis path/to/project.pgis      # run and open a project
 uv run pytest                             # tests (Qt tests run offscreen via tests/conftest.py)
 uv run ruff check . && uv run ruff format --check .   # lint + format check
 uv run ruff format .                      # format
@@ -76,6 +77,16 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
   identify popup in Identify mode (I) and well logs otherwise. Raster values at the click are
   sampled in the background with `io.raster_io.sample_raster`. The canvas selection overlay is
   `canvas.set_highlight(geoms)`; Esc clears it.
+- Project files (`io/project_io.py`): JSON with `format`, `version` (bump `PROJECT_VERSION` and
+  keep loading older versions when the schema changes), `crs`, `view` and `layers` (top-first).
+  Each layer stores `source` (relative to the .pgis) plus `source_abs` as a fallback, its style,
+  and kind-specific fields: vector `source_layer`, raster `band`, wells `import_options` and
+  `logs`. Saving is atomic (temp file plus replace). Loading re-reads every source in a worker.
+  A broken layer or missing LAS file becomes a warning, never a failed open. Round-trip identity
+  is tested by comparing `project_to_dict` before and after.
+- Tests: an autouse fixture in `tests/conftest.py` answers "discard" to the unsaved-changes
+  prompt and points `RecentProjects` at a temporary QSettings file. New modal prompts must be
+  module-level functions that can be monkeypatched the same way, or tests will hang.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

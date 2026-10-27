@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 
 from petrogis import __version__
 from petrogis.core.attributes import IdentifyHit, identify
-from petrogis.core.crs import CRSError, crs_label, normalize_crs
+from petrogis.core.crs import DEFAULT_PROJECT_CRS, CRSError, crs_label, normalize_crs
 from petrogis.core.extent import Extent
 from petrogis.core.layers import FeatureLayer, Layer, RasterLayer, VectorLayer, WellLayer
 from petrogis.core.logs import match_logs
@@ -29,6 +29,12 @@ from petrogis.core.project import Project
 from petrogis.core.styles import VECTOR_PALETTE
 from petrogis.io.errors import MissingCRSError
 from petrogis.io.las_io import LAS_FILE_FILTER, LasBatch, read_las_files
+from petrogis.io.project_io import (
+    PROJECT_FILE_FILTER,
+    LoadedProject,
+    load_project,
+    save_project,
+)
 from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer, sample_raster
 from petrogis.io.vector_io import VECTOR_FILE_FILTER, list_layers, load_vector_layer
 from petrogis.io.wells_io import (
@@ -54,11 +60,32 @@ from petrogis.ui.layer_panel import LayerPanel
 from petrogis.ui.log_viewer import LogViewer
 from petrogis.ui.map_controller import MapController
 from petrogis.ui.project_bridge import ProjectBridge
+from petrogis.ui.recent import RecentProjects
 from petrogis.ui.workers import TaskRunner
 
 log = logging.getLogger(__name__)
 
 MULTI_LAYER_SUFFIXES = {".gpkg", ".kml"}
+
+
+def ask_save_changes(parent: QWidget) -> str:
+    """Ask whether to save unsaved changes. Returns "save", "discard" or "cancel"."""
+    buttons = (
+        QMessageBox.StandardButton.Save
+        | QMessageBox.StandardButton.Discard
+        | QMessageBox.StandardButton.Cancel
+    )
+    answer = QMessageBox.question(
+        parent,
+        "Unsaved Changes",
+        "The project has unsaved changes. Save them first?",
+        buttons,
+        QMessageBox.StandardButton.Save,
+    )
+    return {
+        QMessageBox.StandardButton.Save: "save",
+        QMessageBox.StandardButton.Discard: "discard",
+    }.get(answer, "cancel")
 
 
 def format_coord(value: float) -> str:
@@ -67,10 +94,15 @@ def format_coord(value: float) -> str:
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, project: Project | None = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        project: Project | None = None,
+        parent: QWidget | None = None,
+        recent: RecentProjects | None = None,
+    ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("PetroGIS")
         self.resize(1280, 800)
+        self.recent = recent or RecentProjects()
 
         self.project = project or Project()
         self.bridge = ProjectBridge(self.project, self)
@@ -121,6 +153,17 @@ class MainWindow(QMainWindow):
         self._build_toolbar()
         self._build_status_bar()
         self.canvas.cursor_moved.connect(self._show_cursor)
+        for signal in (
+            self.bridge.layer_added,
+            self.bridge.layer_removed,
+            self.bridge.layer_moved,
+            self.bridge.layer_changed,
+            self.bridge.crs_changed,
+            self.bridge.cleared,
+        ):
+            signal.connect(self._update_title)
+        self.bridge.cleared.connect(self.log_viewer.clear)
+        self._update_title()
         self.bridge.crs_changed.connect(self._show_crs)
 
     # --- construction ------------------------------------------------------------------------
@@ -135,6 +178,18 @@ class MainWindow(QMainWindow):
 
     def _build_actions(self) -> None:
         self.exit_action = self._action("E&xit", self.close, QKeySequence.StandardKey.Quit)
+        self.new_project_action = self._action(
+            "&New Project", self.new_project, QKeySequence.StandardKey.New
+        )
+        self.open_project_action = self._action(
+            "&Open Project…", lambda: self.open_project(), QKeySequence.StandardKey.Open
+        )
+        self.save_project_action = self._action(
+            "&Save Project", self.save_project, QKeySequence.StandardKey.Save
+        )
+        self.save_project_as_action = self._action(
+            "Save Project &As…", lambda: self.save_project_as(), QKeySequence.StandardKey.SaveAs
+        )
         self.add_vector_action = self._action(
             "Add &Vector Layer…", self.open_vector_dialog, "Ctrl+Shift+V"
         )
@@ -191,6 +246,12 @@ class MainWindow(QMainWindow):
     def _build_menus(self) -> None:
         bar = self.menuBar()
         file_menu = bar.addMenu("&File")
+        file_menu.addActions([self.new_project_action, self.open_project_action])
+        self.recent_menu = file_menu.addMenu("Open &Recent")
+        self.recent_menu.aboutToShow.connect(self._build_recent_menu)
+        file_menu.addSeparator()
+        file_menu.addActions([self.save_project_action, self.save_project_as_action])
+        file_menu.addSeparator()
         file_menu.addAction(self.exit_action)
 
         layers_menu = bar.addMenu("&Layers")
@@ -606,6 +667,115 @@ class MainWindow(QMainWindow):
         if extent is not None:
             self.canvas.set_view_extent(extent.buffered())
 
+    # --- project files -------------------------------------------------------------------------
+    def _update_title(self, *_args: object) -> None:
+        name = Path(self.project.path).name if self.project.path else "Untitled"
+        self.setWindowTitle(f"{name}{' *' if self.project.dirty else ''} – PetroGIS")
+
+    def maybe_save(self) -> bool:
+        """Offer to save unsaved changes. Returns False if the user cancelled."""
+        if not self.project.dirty or (len(self.project) == 0 and self.project.path is None):
+            return True
+        answer = ask_save_changes(self)
+        if answer == "cancel":
+            return False
+        if answer == "save":
+            return self.save_project()
+        return True
+
+    def new_project(self) -> None:
+        if not self.maybe_save():
+            return
+        self.project.clear()
+        self.project.set_crs(DEFAULT_PROJECT_CRS)
+        self.project.dirty = False
+        self._update_title()
+
+    def save_project(self) -> bool:
+        if self.project.path is None:
+            return self.save_project_as()
+        return self._write_project(self.project.path)
+
+    def save_project_as(self, path: str | Path | None = None) -> bool:
+        if path is None:
+            start = self.project.path or "untitled.pgis"
+            chosen, _ = QFileDialog.getSaveFileName(
+                self, "Save Project As", start, PROJECT_FILE_FILTER
+            )
+            if not chosen:
+                return False
+            path = chosen
+        return self._write_project(path)
+
+    def _write_project(self, path: str | Path) -> bool:
+        try:
+            saved = save_project(self.project, path, view=self.canvas.view_extent())
+        except Exception as exc:  # noqa: BLE001 - shown to the user
+            show_error(self, "Cannot save project", str(exc), exc)
+            return False
+        self.recent.add(saved)
+        self._update_title()
+        self.statusBar().showMessage(f"Saved {saved.name}", 3000)
+        return True
+
+    def open_project(self, path: str | Path | None = None) -> None:
+        if not self.maybe_save():
+            return
+        if path is None:
+            chosen, _ = QFileDialog.getOpenFileName(self, "Open Project", "", PROJECT_FILE_FILTER)
+            if not chosen:
+                return
+            path = chosen
+        path = Path(path)
+        self.statusBar().showMessage(f"Opening {path.name}…")
+        self.tasks.submit(
+            load_project,
+            path,
+            on_result=self._on_project_loaded,
+            on_error=lambda exc: self._on_project_failed(path, exc),
+        )
+
+    def _on_project_loaded(self, loaded: LoadedProject) -> None:
+        self.project.clear()
+        self.project.set_crs(loaded.project.crs)
+        for layer in reversed(loaded.project.layers):
+            self.project.add_layer(layer)
+        self.project.path = loaded.project.path
+        self.project.dirty = False
+        if loaded.view is not None:
+            self.canvas.set_view_extent(loaded.view)
+        else:
+            self.zoom_to_full_extent()
+        assert self.project.path is not None
+        self.recent.add(self.project.path)
+        self._update_title()
+        self.statusBar().showMessage(f"Opened {Path(self.project.path).name}", 3000)
+        if loaded.warnings:
+            show_warning(self, "Project opened with problems", "\n".join(loaded.warnings))
+
+    def _on_project_failed(self, path: Path, exc: BaseException) -> None:
+        self.statusBar().clearMessage()
+        if not path.exists():
+            self.recent.remove(path)
+        show_error(self, "Cannot open project", str(exc), exc)
+
+    def _build_recent_menu(self) -> None:
+        self.recent_menu.clear()
+        paths = self.recent.paths()
+        for entry in paths:
+            action = self.recent_menu.addAction(Path(entry).name)
+            action.setToolTip(entry)
+            action.setStatusTip(entry)
+            action.triggered.connect(lambda _checked=False, p=entry: self.open_project(p))
+        if paths:
+            self.recent_menu.addSeparator()
+            self.recent_menu.addAction("Clear Recent", self.recent.clear)
+        else:
+            self.recent_menu.addAction("No recent projects").setEnabled(False)
+
     def closeEvent(self, event: QCloseEvent) -> None:
+        if not self.maybe_save():
+            event.ignore()
+            return
         self.bridge.detach()
         super().closeEvent(event)

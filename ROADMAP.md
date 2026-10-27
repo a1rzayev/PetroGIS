@@ -14,7 +14,7 @@
 - [x] M5 — LAS logs: batch import, name matching, mnemonic aliases, log viewer dock
       (GR | resistivity log-scale | NPHI+RHOB, shared inverted depth)
 - [x] M6 — Identify tool + attribute table dock
-- [ ] M7 — Project save/open (.pgis) + recent projects
+- [x] M7 — Project save/open (.pgis) + recent projects
 - [ ] M8 — Hardening: error paths, clean-checkout test run, definition-of-done walkthrough
 - [ ] M9 — Docs polish, Phase 2 notes
 
