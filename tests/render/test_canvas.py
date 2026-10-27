@@ -51,6 +51,7 @@ def test_vector_layer_uses_three_items(canvas):
     assert graphics.points.data.size == 1
     layer.style = VectorStyle(color="#ff0000", opacity=0.5)
     canvas.update_layer_style(layer)
+    graphics = canvas.graphics(layer.id)  # vector graphics are rebuilt on restyle
     assert graphics.lines.opts["pen"].color().name() == "#ff0000"
     assert graphics.points.opacity() == pytest.approx(0.5)
     canvas.set_layer_visible(layer.id, False)

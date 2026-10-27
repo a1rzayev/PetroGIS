@@ -84,7 +84,7 @@ def test_assumed_crs_survives_project_round_trip(window, qtbot, tmp_path, monkey
     shp = tmp_path / "nocrs.shp"
     with pytest.warns(UserWarning):
         gpd.GeoDataFrame({"name": ["W"]}, geometry=[Point(405000, 4475000)]).to_file(shp)
-    monkeypatch.setattr(mw.QInputDialog, "getText", lambda *a, **k: ("EPSG:32639", True))
+    monkeypatch.setattr(mw, "ask_crs", lambda parent, message, default: "EPSG:32639")
     window.load_vector(shp)  # first attempt fails with MissingCRSError, then the prompt retries
     qtbot.waitUntil(lambda: len(window.project) == 1 and window.tasks.pending == 0, timeout=10000)
     layer = window.project.layers[0]

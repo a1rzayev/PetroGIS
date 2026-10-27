@@ -44,17 +44,34 @@ Exit: the 12-step MVP workflow test passes in CI and against installed builds on
 platforms; 5 target users complete the tutorial; budgets hold at 500 wells, a 1 GB raster and
 100k features.
 
-- [ ] P2.1 — Layer registry; CRS picker, change CRS with layers loaded, datum transformation choice,
+- [x] P2.1 — Layer registry; CRS picker, change CRS with layers loaded, datum transformation choice,
       raster CRS prompt; delimited text with XY columns, decimal-comma CSV, `.cpg` encodings;
       broken-path repair; rasters placed below vector layers
-- [ ] P2.2 lite — Safe expression engine (no Python eval); categorized and graduated styles;
+  - Follow-ups: encoding override has no UI yet (project file/API only); explicit-transformation
+    rasters use nearest-neighbour sampling; Soviet/Russian GK tables (X = northing) need X/Y
+    swapped by hand in the mapping dialog
+- [x] P2.2 lite — Safe expression engine (no Python eval); categorized and graduated styles;
       polygon fill; labels for any layer; legend; well status symbols
-- [ ] P2.6a — Wells in depth: minimum-curvature trajectories, MD/TVD/TVDSS, formation tops, log
+  - Follow-ups: per-class visibility toggles in the legend; graduated symbol size; `$area` and
+    `$length` are planar in the project CRS (QGIS defaults to ellipsoidal); no date functions or
+    regular expressions in expressions yet (regexes need a ReDoS-safe engine first)
+- [x] P2.6a — Wells in depth: minimum-curvature trajectories, MD/TVD/TVDSS, formation tops, log
       track templates, fills and shading, decimation, depth unit conversion, `.pgis` v2
-- [ ] Correlation panel — well-to-well section with tops picking, flattening on a top, track
+  - Follow-ups: log track templates (user-defined tracks and curves) move to the correlation
+    panel milestone; survey azimuths are taken as grid north (no convergence or magnetic
+    declination correction); MD↔TVD is interpolated linearly between stations; surveys can't be
+    imported from LAS or Excel workbooks with several sheets yet
+- [x] Correlation panel — well-to-well section with tops picking, flattening on a top, track
       templates, well selection from map or table
-- [ ] P2.5 lite — Processing registry, background runs with cancel, history; sample raster at
+  - Follow-ups: saving templates to their own files for reuse across projects; horizontal
+    spacing by distance between wells; picking on a log track's curve (snap to inflection);
+    sections across several well layers
+- [x] P2.5 lite — Processing registry, background runs with cancel, history; sample raster at
       wells, clip, reproject, zonal statistics
+  - Follow-ups: batch mode and the rest of the algorithm library (P2.5 rest); raster sampling
+    is nearest-cell (no interpolation); zonal statistics reads each zone's window at full
+    resolution, so very large zones on huge rasters are slow; vector algorithms cancel only
+    between steps (clip checks every 5,000 features)
 - [ ] P2.6b — Gridding (IDW, splines, kriging), contours, volumetrics with Monte Carlo,
       cross-sections
 - [ ] P2.4 lite — GeoPackage layers, digitizing lines and polygons with snapping, undo/redo

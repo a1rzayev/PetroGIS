@@ -95,7 +95,9 @@ def test_missing_sources_become_warnings(field_copy):
     (field_copy / "las" / "AB_02.las").unlink()
     loaded = load_project(path)
     assert [layer.name for layer in loaded.project.layers] == ["wells", "Boundary"]
-    assert any("structure_top" in w and "skipped" in w for w in loaded.warnings)
+    assert any("structure_top" in w and "Source not found" in w for w in loaded.warnings)
+    assert [(m.name, m.position) for m in loaded.missing] == [("structure_top", 2)]
+    assert loaded.missing[0].stored_path == "structure_top.tif"
     assert any("AB_02.las" in w for w in loaded.warnings)
     assert sum(len(v) for v in loaded.project.layers[0].logs.values()) == 9
 

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
+from typing import Any
 
 import pyqtgraph as pg
 from numpy.typing import ArrayLike
@@ -24,6 +26,28 @@ from petrogis.render.pg.well_items import WellGraphics
 VIEW_CHANGE_DEBOUNCE_MS = 120
 
 pg.setConfigOptions(antialias=False, imageAxisOrder="row-major")
+
+
+GraphicsFactory = Callable[[Any], LayerGraphics]
+_GRAPHICS: dict[type[Layer], GraphicsFactory] = {}
+
+
+def register_graphics(layer_type: type[Layer], factory: GraphicsFactory) -> None:
+    """Choose how a layer type is drawn. Subclasses use their nearest registered base class."""
+    _GRAPHICS[layer_type] = factory
+
+
+def graphics_for(layer: Layer) -> LayerGraphics:
+    for cls in type(layer).__mro__:
+        factory = _GRAPHICS.get(cls)
+        if factory is not None:
+            return factory(layer)
+    raise TypeError(f"Cannot render layer type {type(layer).__name__}")
+
+
+register_graphics(VectorLayer, VectorGraphics)  # also DelimitedLayer
+register_graphics(RasterLayer, RasterGraphics)
+register_graphics(WellLayer, WellGraphics)
 
 
 class CoordinateAxis(pg.AxisItem):
@@ -77,14 +101,7 @@ class PgMapCanvas(pg.PlotWidget):
     def add_layer(self, layer: Layer) -> None:
         if layer.id in self._layers:
             raise ValueError(f"Layer {layer.id} is already on the canvas")
-        if isinstance(layer, VectorLayer):
-            graphics: LayerGraphics = VectorGraphics(layer)
-        elif isinstance(layer, RasterLayer):
-            graphics = RasterGraphics(layer)
-        elif isinstance(layer, WellLayer):
-            graphics = WellGraphics(layer)
-        else:
-            raise TypeError(f"Cannot render layer type {type(layer).__name__}")
+        graphics = graphics_for(layer)
         for item in graphics.items:
             self.addItem(item)
         graphics.set_visible(layer.visible)
@@ -108,8 +125,19 @@ class PgMapCanvas(pg.PlotWidget):
         return self._layers[layer_id]
 
     def update_layer_style(self, layer: Layer) -> None:
-        # Each graphics class was built for its layer type in add_layer.
-        self._layers[layer.id].apply_style(layer)
+        graphics = self._layers[layer.id]
+        if not graphics.rebuild_on_restyle:
+            graphics.apply_style(layer)
+            return
+        # The style can change the number of symbol classes, and so the item list: rebuild.
+        for item in graphics.items:
+            self.removeItem(item)
+        rebuilt = graphics_for(layer)
+        for item in rebuilt.items:
+            self.addItem(item)
+        rebuilt.set_z(graphics.z)
+        rebuilt.set_visible(layer.visible)
+        self._layers[layer.id] = rebuilt
 
     def set_layer_visible(self, layer_id: str, visible: bool) -> None:
         self._layers[layer_id].set_visible(visible)

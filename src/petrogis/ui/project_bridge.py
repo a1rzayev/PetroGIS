@@ -13,6 +13,7 @@ class ProjectBridge(QObject):
     layer_moved = Signal(str, int)
     layer_changed = Signal(str, str)  # layer id, field ("name" | "visible" | "style")
     crs_changed = Signal(str)
+    section_changed = Signal()
     cleared = Signal()
 
     def __init__(self, project: Project, parent: QObject | None = None) -> None:
@@ -35,5 +36,7 @@ class ProjectBridge(QObject):
                 self.layer_changed.emit(event.layer_id, event.field)
             case EventKind.CRS_CHANGED:
                 self.crs_changed.emit(self.project.crs)
+            case EventKind.SECTION_CHANGED:
+                self.section_changed.emit()
             case EventKind.CLEARED:
                 self.cleared.emit()

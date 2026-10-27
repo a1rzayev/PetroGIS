@@ -45,22 +45,31 @@ pytest-qt. Lint/format: ruff. Dependencies: uv + pyproject.toml (+ uv.lock).
 - Large rasters are read downsampled with rasterio `out_shape`. Never load full resolution for display.
 - Project files are JSON (`.pgis`) and store references only. Data stays in the original files or
   a GeoPackage. Computed results (Phase 2) are written to files and loaded back as layers.
-- `analysis/` (Phase 2+) takes and returns core objects and never imports Qt.
+- `analysis/` (Phase 2+) takes and returns core objects and never imports Qt. Test files need
+  unique basenames across `tests/` (there are no `__init__.py` files).
 
 ## Where things live
 
 | Area | Modules | Notes |
 |---|---|---|
-| Project model | `core/project.py`, `core/layers.py`, `core/styles.py` | `layers[0]` is topmost. Changes are emitted as `ProjectEvent`s via `subscribe()`. `LAYER_CHANGED.field` is one of name / visible / style / logs. |
+| Project model | `core/project.py`, `core/layers.py`, `core/styles.py` | `layers[0]` is topmost. Changes are emitted as `ProjectEvent`s via `subscribe()`. `LAYER_CHANGED.field` is one of name / visible / style / logs / trajectories / tops. |
+| Expressions | `core/expressions/` (`parser.py`, `evaluate.py`) | QGIS-compatible subset. Our own tokenizer and Pratt parser, never `eval`. Limits: `MAX_LENGTH`, `MAX_DEPTH` (tree depth, so long `a + b + …` chains count) and `MAX_NODES`. Evaluation is column-wise over pandas nullable dtypes (`Int64`/`Float64`/`string`/`boolean`), with NULL as `pd.NA` and Kleene logic. Only `FUNCTIONS` can be called. Every failure raises `ExpressionError`; keep the hypothesis fuzzers green. |
+| Styling | `core/styles.py`, `core/classify.py`, `core/renderers.py`, `core/legend.py` | Styles are plain data, validated on construction (expressions parsed, never run; at most `MAX_CLASSES`). Styles are replaced, never mutated, and `VectorLayer.classification()` caches by style identity. `classify_features` gives rows per symbol class and the legend reads the same result. Well status symbols come from `core/wells.classify_status` (EN/RU/AZ aliases) and `WELL_SYMBOLS`. |
 | Geometry | `core/geometry.py`, `core/extent.py` | `to_paths()` builds NaN-separated arrays, vectorised. |
 | Vectors / rasters IO | `io/vector_io.py`, `io/raster_io.py` | Readers raise `DataReadError` (message shown as-is). `MissingCRSError` means ask the user. KML is always EPSG:4326. Raster reads are stateless (open/close per call), so they are thread-safe. They never upsample, and they warp with `WarpedVRT`. |
 | Wells | `core/wells.py`, `io/wells_io.py` | `normalize_well_name` is the single matching key ("AB-01", "ab_1" and "AB 1" all give "AB1"). Import is two-step: `read_well_table`, then `build_well_layer`. The mapping dialog appears only when detection is incomplete. Bad rows and duplicates become warnings. |
-| Logs | `core/mnemonics.py`, `core/logs.py`, `io/las_io.py` | Add vendor mnemonics to the alias table only. Matching tries WELL name, then UWI, then file name. Logs attach via `Project.attach_logs`. Depth is MD in the file's unit, and wells are vertical in Phase 1. |
+| Logs | `core/mnemonics.py`, `core/logs.py`, `io/las_io.py` | Add vendor mnemonics to the alias table only. Matching tries WELL name, then UWI, then file name. Logs attach via `Project.attach_logs`. LAS depth is MD in the file's unit (`metres_per_unit` converts). `minmax_decimate` thins long curves for drawing. |
+| Trajectories and tops | `core/trajectory.py`, `core/tops.py`, `io/survey_io.py`, `io/tops_io.py`, `analysis/tops.py`, `ui/well_data.py` | Minimum curvature; all depths stored in metres, azimuths grid north. `WellLayer.trajectories` / `tops` are keyed by `name_key`; wells without a survey are vertical. Attach through `Project.attach_trajectories` / `attach_tops`, passing a `{path, import_options}` record so the project file can re-read the file. Readers use `io/tables.read_table` + `detect_fields`; tops read long or wide layouts. `tops_points` gives a surface's picks with TVDSS at the pick's XY. |
+| Correlation | `core/correlation.py`, `ui/correlation.py` | `CorrelationSection` (layer, well keys, `TrackTemplate`, datum, flatten surface) lives on `Project.section` (`SECTION_CHANGED`). Curves are drawn in each track's normalised 0–1 width (`normalize_curve`). `section_depth` / `md_at` convert MD to the section axis and back (trajectory, KB, flattening shift). Picks go through `Project.set_pick` / `delete_pick`, which record `WellLayer.pick_overrides`; a fresh tops import of a surface clears its overrides. |
+| Processing | `analysis/processing.py`, `analysis/algorithms.py`, `io/raster_ops.py`, `io/processing_history.py`, `ui/processing.py` | Subclass `Algorithm` (declare `parameters`, implement `run`) and `register_algorithm` it in `analysis/algorithms.py`. `run` executes in a worker: read inputs only, write outputs to files (they load back as layers), and call `feedback.check()` / `feedback.progress()` between steps; `execute` removes partial outputs on failure or cancel. Raster file work goes in `io/raster_ops.py` (takes `check`/`progress`, never catches the cancel exception). History is per-user JSON lines; re-runs re-validate every parameter. |
+| Layer registries | `io/project_io.py` (`register_layer_codec`), `render/pg/canvas.py` (`register_graphics`), `ui/style_editors.py` (`register_style_editor`) | A new layer kind registers in all three; no `isinstance` chains. Graphics and style editors resolve through the class MRO, so `DelimitedLayer` reuses the vector ones. |
+| CRS and transformations | `core/crs.py` (`search_crs`, `transformation_options`, `is_known_pipeline`), `core/transform.py`, `io/reproject.py` | Loaders take `transformation=` as a pipeline or a lookup by source CRS. `Project.transformations` holds the user's choices. Project files store them, and the loader keeps only pipelines that PROJ itself offers for the pair. Changing the CRS re-reads every layer with `reload_layers` (all or nothing) and swaps them in with `Project.replace_contents`. |
+| Tables | `io/tables.py`, `io/delimited_io.py` | `to_numbers` parses decimal commas, spaces and apostrophes as grouping. pandas 3 reads text as the `str` dtype, so test dtypes by kind, never `== object`. Header normalisation keeps letters of any script (Azerbaijani and Russian aliases exist). |
 | Attributes / identify | `core/attributes.py` | Formatting, filter and sort over row-position arrays, and `identify()`. |
 | Project files | `io/project_io.py` | See "Project file format" below. |
-| Rendering | `render/pg/canvas.py`, `items.py`, `well_items.py`, `render/labels.py` | Constant item count per layer. `set_highlight()` draws the selection overlay. |
+| Rendering | `render/pg/canvas.py`, `items.py`, `well_items.py`, `label_items.py`, `symbols.py`, `legend_icons.py`, `render/labels.py` | The item count never depends on the feature count: per symbol class one fill, ring, line and point item, plus one `LabelItem` per layer. `to_paths` orients rings so `FillItem` can use the winding rule. Vector graphics set `rebuild_on_restyle`, so the canvas rebuilds them on a style change (keeping z and visibility). `graphics.error` says why part of a style could not be applied. `set_highlight()` draws the selection overlay. |
 | App shell | `ui/main_window.py` | Menus, docks, loading flows, project files, identify, map clicks. |
-| UI parts | `ui/layer_panel.py`, `log_viewer.py`, `attribute_table.py`, `identify.py`, `dialogs/` | |
+| UI parts | `ui/layer_panel.py`, `legend.py`, `log_viewer.py`, `attribute_table.py`, `identify.py`, `widgets.py` (`ColorButton`, `ExpressionEdit`), `dialogs/` | |
 | Async | `ui/workers.py`, `ui/map_controller.py` | See "Background work" below. |
 | Demo data | `sample_data.py`, `scripts/make_sample_data.py` | Boundary GeoJSON in EPSG:4326 (exercises reprojection), everything else EPSG:32639. LAS names and mnemonics vary on purpose, and `OFFSET-1` is a deliberate orphan. |
 
@@ -77,10 +86,15 @@ pytest-qt. Lint/format: ruff. Dependencies: uv + pyproject.toml (+ uv.lock).
 
 ## Project file format
 
-JSON with `format`, `version`, `crs`, `view` and `layers` (top-first). Each layer stores `source`
+JSON with `format`, `version`, `crs`, `view` and `layers` (top-first). A style that fails
+validation is replaced by the default style with a warning (`LoadContext.style`). Each layer stores `source`
 (relative to the .pgis) and `source_abs` (fallback), `id`, `name`, `visible` and `style`, plus
 kind-specific fields: vector `source_layer` and `assume_crs`, raster `band`, wells
-`import_options` (column mapping, source CRS, sheet) and `logs` (paths). Saving is atomic (temp
+`import_options` (column mapping, source CRS, sheet), `logs` (paths), and since version 2
+`surveys` and `tops` (`path`, `path_abs`, `import_options`); since version 3 `picks` (interactive
+overrides: `well`, `surface`, `md`, or `md: null` for a deleted pick, capped at `MAX_PICKS`) and a
+top-level `correlation` section. Picks are the one piece of data stored inline: they are small,
+user-authored interpretation, like styles. Older versions still load. Saving is atomic (temp
 file plus replace). Loading re-reads every source in a worker, and a broken layer or missing file
 becomes a warning, never a failed open. To change the schema, bump `PROJECT_VERSION` and keep
 reading older versions. Round-trip identity is tested by comparing `project_to_dict` before and after.
@@ -92,7 +106,7 @@ The app must stay responsive with real field data.
 - Keep startup lazy: `petrogis.app` must not import geopandas/rasterio/pandas/lasio/pyqtgraph at
   module level (a test enforces this). Startup to a visible window is about 0.35 s. Keep it there.
 - Never block the UI thread on file IO. Use `TaskRunner`.
-- Vector rendering uses one NaN-separated path per geometry type per layer, never one item per
+- Vector rendering uses one NaN-separated path per geometry type per symbol class, never one item per
   feature. Arrays are built once, vectorised with shapely 2, and cached on the layer (built on the
   loader thread).
 - Raster display reads at screen resolution for the current view. Re-reads are debounced on pan
@@ -112,6 +126,12 @@ The app must stay responsive with real field data.
   and points `RecentProjects` at a temporary QSettings file. Any new modal prompt must be a
   module-level function that can be monkeypatched the same way, or tests will hang.
 - UI tests stub `show_error` / `show_warning` via `monkeypatch` on `petrogis.ui.main_window`.
+- The autosave, recovery, CRS, delimited-column, transformation and repair prompts are module-level
+  functions in `ui/main_window.py` (`ask_crs`, `ask_repair_paths`, …); survey/tops prompts live in
+  `ui/well_data.py`, the track-scale prompt in `ui/log_viewer.py`, and the section-wells and
+  template prompts in `ui/correlation.py`. The conftest also points
+  `ui/processing.default_history_path` at a temporary file, so tests never touch the user's history. The conftest makes each one
+  return "cancel" by default, and tests override them per test.
 - `tests/test_definition_of_done.py` runs the Phase 1 definition of done through the real
   `petrogis.app.main`. Keep it passing.
 - After each milestone, run ruff, pytest and the offscreen screenshot (`--demo`), and look at the
@@ -137,6 +157,10 @@ The app must stay responsive with real field data.
 - pyqtgraph downsampling and clip-to-view assume x is the independent variable. Log curves plot
   depth on y, so don't enable them there.
 - `QSettings` returns a bare string for a one-item list. `RecentProjects.paths()` handles this.
+- Qt returns `StrEnum` values stored as combo-box data as plain `str`: convert back
+  (`CurveFamily(raw)`) before using them as enum members.
+- `pg.InfLineLabel` sets plain text but runs it through `str.format`: double the braces in
+  data-derived text (`{` → `{{`), or a name like `{value.__class__}` is interpreted.
 
 ## Conventions
 

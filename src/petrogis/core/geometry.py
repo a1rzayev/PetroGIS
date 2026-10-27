@@ -25,7 +25,8 @@ class GeometryPaths:
     """Render-ready coordinates for a geometry collection.
 
     ``points`` has shape (N, 2). ``lines`` and ``rings`` have shape (M, 2), with NaN rows between
-    parts. Polygons contribute their exterior and interior rings, drawn as outlines.
+    parts. Polygons contribute their exterior rings (counter-clockwise) and interior rings
+    (clockwise), which renderers stroke as outlines and fill with the non-zero rule.
     """
 
     points: NDArray[np.float64]
@@ -82,6 +83,27 @@ def to_paths(geoms: ArrayLike) -> GeometryPaths:
 
     line_parts = parts[(types == _GEOM_LINESTRING) | (types == _GEOM_LINEARRING)]
     polygons = parts[types == _GEOM_POLYGON]
-    rings = shapely.get_rings(polygons) if polygons.size else np.empty(0, dtype=object)
+    if polygons.size:
+        # Exteriors counter-clockwise and holes clockwise, so a non-zero (winding) fill draws
+        # holes as holes and overlapping polygons as filled.
+        polygons = shapely.orient_polygons(polygons, exterior_cw=False)
+        rings = shapely.get_rings(polygons)
+    else:
+        rings = np.empty(0, dtype=object)
 
     return GeometryPaths(points=points, lines=nan_separated(line_parts), rings=nan_separated(rings))
+
+
+def label_points(geoms: ArrayLike) -> NDArray[np.float64]:
+    """One label anchor per geometry, shape (N, 2): the point itself, or a point guaranteed to lie
+    on the line or inside the polygon. Missing or empty geometries give NaN."""
+    array = np.asarray(geoms, dtype=object)
+    if array.size == 0:
+        return _empty()
+    out = np.full((array.size, 2), np.nan)
+    valid = ~(shapely.is_missing(array) | shapely.is_empty(array))
+    if valid.any():
+        anchors = shapely.point_on_surface(array[valid])
+        coords, index = shapely.get_coordinates(anchors, return_index=True)
+        out[np.flatnonzero(valid)[index]] = coords  # an invalid polygon can give no point
+    return out

@@ -107,3 +107,29 @@ def test_generation_is_fast(tmp_path):
     start = time.perf_counter()
     sd.generate(tmp_path, seed=1)
     assert time.perf_counter() - start < 10.0
+
+
+def test_surveys_and_tops(sample_field):
+    surveys = pd.read_csv(sample_field.surveys_csv)
+    assert list(surveys.columns) == ["Well", "MD (m)", "Inclination", "Azimuth"]
+    assert set(surveys["Well"]) == {"AB-04", "AB-06"}
+    tops = pd.read_csv(sample_field.tops_csv)
+    assert len(tops) == 3 * sd.N_WELLS
+    by_well = {w.name: w for w in sample_field.wells}
+    reservoir = tops[tops["Surface"] == "Top Reservoir"].set_index("Well")["MD"]
+    for name, md in reservoir.items():
+        well = by_well[name]
+        assert md == pytest.approx(well.top_md, abs=0.05)
+        tvdss = float(well.trajectory().md_to_tvd(md)[0]) - well.kb
+        assert tvdss == pytest.approx(well.top_tvdss, abs=0.5)
+    deviated = by_well["AB-06"]
+    assert deviated.top_md - (deviated.top_tvdss + deviated.kb) > 100
+
+
+def test_deviated_well_logs_follow_the_path(sample_field):
+    well = next(w for w in sample_field.wells if w.name == "AB-06")
+    las = lasio.read(sample_field.las_files[sample_field.wells.index(well)])
+    gr = las.df()[next(c for c in las.df().columns if c in ("GR", "GR_EDTC", "SGR"))]
+    in_res = (gr.index > well.top_md + 3) & (gr.index < well.top_md + 20)
+    above = gr.index < well.top_md - 60
+    assert gr[in_res].median() < gr[above].median() - 40

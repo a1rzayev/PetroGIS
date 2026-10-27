@@ -26,7 +26,7 @@ def no_dialogs(monkeypatch):
 
 def test_main_window_shell(window):
     menus = [action.text().replace("&", "") for action in window.menuBar().actions()]
-    assert menus == ["File", "Layers", "View", "Help"]
+    assert menus == ["File", "Layers", "Processing", "View", "Help"]
     assert window.layer_dock.isVisible()
     assert window.crs_label.text() == DEFAULT_PROJECT_CRS
 

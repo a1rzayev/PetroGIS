@@ -7,6 +7,9 @@ The field is an elongated WNW-ESE anticline (the typical Absheron structural tre
   so that loading it exercises reprojection to the project CRS
 - ``wells.csv`` / ``wells.xlsx``: the same well headers under different column names, so that
   column auto-detection gets exercised
+- ``surveys.csv``: deviation surveys for the two deviated wells (AB-04 and AB-06), the others
+  being vertical
+- ``tops.csv``: formation tops (MD) for every well, consistent with the logs and the structure
 - ``las/*.las``: one LAS 2.0 file per well. Curve mnemonics vary per well (GR/GR_EDTC/SGR, ...) and
   WELL names are written inconsistently (``AB-01``, ``AB 02``, ``ab_03``, ``AB-4``). There is also
   one offset well (``OFFSET-1``) with no matching header, to test unmatched-LAS reporting.
@@ -21,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+
+from petrogis.core.trajectory import Trajectory
 
 CRS_EPSG = 32639
 CENTER_X = 405_000.0
@@ -51,6 +56,12 @@ MNEMONIC_VARIANTS: dict[str, list[tuple[str, str]]] = {
     "RHOB": [("RHOB", "G/CC"), ("RHOZ", "G/CC"), ("DEN", "G/CC")],
 }
 WELL_NAME_STYLES = ("AB-{:02d}", "AB {:02d}", "ab_{:02d}", "AB-{}")
+SURVEY_STEP_M = 30.0
+# Deviated wells by index: kick-off MD, build rate (°/30 m), hold inclination, and azimuth
+# relative to the bearing towards the crest (both are steered towards the structure).
+DEVIATED = {3: (700.0, 2.5, 35.0, 20.0), 5: (600.0, 3.0, 50.0, -15.0)}
+MARKER_ABOVE_TOP_M = 120.0
+"""The "Shale Marker" top lies this far (TVD) above top reservoir."""
 
 
 @dataclass(frozen=True)
@@ -62,7 +73,17 @@ class WellHeader:
     kb: float
     td_md: float
     top_tvdss: float
+    """Top reservoir TVDSS where the well penetrates it."""
     status: str
+    top_md: float = float("nan")
+    survey: tuple[tuple[float, float, float], ...] = ()
+    """(MD, inclination, azimuth) stations for deviated wells; empty for vertical ones."""
+
+    def trajectory(self) -> Trajectory:
+        if not self.survey:
+            return Trajectory.vertical(self.td_md)
+        md, inc, azi = (np.array(v) for v in zip(*self.survey, strict=True))
+        return Trajectory.from_survey(md, inc, azi)
 
 
 @dataclass
@@ -73,6 +94,8 @@ class SampleField:
     wells_csv: Path
     wells_xlsx: Path
     las_dir: Path
+    surveys_csv: Path
+    tops_csv: Path
     las_files: list[Path] = field(default_factory=list)
     wells: list[WellHeader] = field(default_factory=list)
 
@@ -178,12 +201,28 @@ def make_well_headers(rng: np.random.Generator) -> list[WellHeader]:
     ys = CENTER_Y + along * np.sin(theta) + across * np.cos(theta)
     kbs = rng.uniform(15.0, 45.0, N_WELLS)
     tops = structure_depth(xs, ys)
-
     wells = []
     for i in range(N_WELLS):
-        top = float(tops[i])
         kb = round(float(kbs[i]), 1)
-        td_md = round(top + RESERVOIR_THICKNESS + 150.0 + kb, 1)
+        top = float(tops[i])
+        survey: tuple[tuple[float, float, float], ...] = ()
+        if i in DEVIATED:
+            kop, build, hold, offset = DEVIATED[i]
+            to_crest = np.degrees(np.arctan2(CENTER_X - xs[i], CENTER_Y - ys[i]))
+            azimuth = round(float((to_crest + offset) % 360.0), 1)
+            survey = _build_hold_survey(kop, build, hold, azimuth, total_md=4000.0)
+            path = Trajectory.from_survey(*(np.array(v) for v in zip(*survey, strict=True)))
+            # Iterate to where the path actually meets the structure.
+            for _ in range(6):
+                md_top = float(path.tvd_to_md(top + kb)[0])
+                dx, dy = path.md_to_xy(md_top)
+                top = float(structure_depth(xs[i] + dx, ys[i] + dy)[0])
+            td_md = round(float(path.tvd_to_md(top + kb + RESERVOIR_THICKNESS + 150.0)[0]), 1)
+            survey = tuple(st for st in survey if st[0] <= td_md + SURVEY_STEP_M)
+            top_md = round(float(path.tvd_to_md(top + kb)[0]), 2)
+        else:
+            td_md = round(top + RESERVOIR_THICKNESS + 150.0 + kb, 1)
+            top_md = round(top + kb, 2)
         status = "OIL" if top < OWC_TVDSS else "DRY"
         wells.append(
             WellHeader(
@@ -195,9 +234,49 @@ def make_well_headers(rng: np.random.Generator) -> list[WellHeader]:
                 td_md=td_md,
                 top_tvdss=round(top, 2),
                 status=status,
+                top_md=top_md,
+                survey=survey,
             )
         )
     return wells
+
+
+def _build_hold_survey(
+    kop: float, build_per_30m: float, hold_inc: float, azimuth: float, total_md: float
+) -> tuple[tuple[float, float, float], ...]:
+    """Vertical to the kick-off point, a constant build, then a tangent section."""
+    md = np.arange(0.0, total_md + SURVEY_STEP_M / 2, SURVEY_STEP_M)
+    inc = np.clip((md - kop) / 30.0 * build_per_30m, 0.0, hold_inc)
+    azi = np.where(md > kop, azimuth, 0.0)
+    return tuple(
+        (float(m), round(float(i), 3), float(a)) for m, i, a in zip(md, inc, azi, strict=True)
+    )
+
+
+def write_surveys(wells: list[WellHeader], path: Path) -> None:
+    import pandas as pd
+
+    rows = [(w.name, md, inc, azi) for w in wells for md, inc, azi in w.survey]
+    pd.DataFrame(rows, columns=["Well", "MD (m)", "Inclination", "Azimuth"]).to_csv(
+        path, index=False
+    )
+
+
+def write_tops(wells: list[WellHeader], path: Path) -> None:
+    """Long-format tops (well, surface, MD) for every well, derived through each trajectory."""
+    import pandas as pd
+
+    rows = []
+    for well in wells:
+        trajectory = well.trajectory()
+        for surface, tvdss in (
+            ("Shale Marker", well.top_tvdss - MARKER_ABOVE_TOP_M),
+            ("Top Reservoir", well.top_tvdss),
+            ("Base Reservoir", well.top_tvdss + RESERVOIR_THICKNESS),
+        ):
+            md = float(trajectory.tvd_to_md(tvdss + well.kb)[0])
+            rows.append((well.name, surface, round(md, 2)))
+    pd.DataFrame(rows, columns=["Well", "Surface", "MD"]).to_csv(path, index=False)
 
 
 def write_well_tables(wells: list[WellHeader], csv_path: Path, xlsx_path: Path) -> None:
@@ -234,11 +313,16 @@ def _smooth(values: np.ndarray, window: int) -> np.ndarray:
 
 
 def synthetic_logs(
-    rng: np.random.Generator, top_md: float, kb: float, start_md: float, stop_md: float
+    rng: np.random.Generator,
+    top_tvdss: float,
+    kb: float,
+    start_md: float,
+    stop_md: float,
+    trajectory: Trajectory | None = None,
 ) -> dict[str, np.ndarray]:
-    """Vectorised synthetic GR/RT/NPHI/RHOB for a vertical well (TVDSS = MD - KB)."""
+    """Vectorised synthetic GR/RT/NPHI/RHOB along a well (vertical unless ``trajectory``)."""
     md = np.round(np.arange(start_md, stop_md + LAS_STEP_M / 2, LAS_STEP_M), 4)
-    tvdss = md - kb
+    tvdss = (trajectory.md_to_tvd(md) if trajectory is not None else md) - kb
     n = md.size
 
     # Sand fraction: random thin sands in the overburden and underburden, plus the reservoir
@@ -249,10 +333,10 @@ def synthetic_logs(
         rng.uniform(start_md, stop_md, n_thin), rng.uniform(1.0, 6.0, n_thin), strict=True
     ):
         sand[np.abs(md - centre) < thick / 2] = rng.uniform(0.4, 0.8)
-    reservoir = (md >= top_md) & (md < top_md + RESERVOIR_THICKNESS)
+    reservoir = (tvdss >= top_tvdss) & (tvdss < top_tvdss + RESERVOIR_THICKNESS)
     sand[reservoir] = 0.9
     for brk in (0.35, 0.7):
-        sand[np.abs(md - (top_md + brk * RESERVOIR_THICKNESS)) < 1.5] = 0.1
+        sand[np.abs(tvdss - (top_tvdss + brk * RESERVOIR_THICKNESS)) < 1.5] = 0.1
     sand = np.clip(_smooth(sand, 5), 0.0, 1.0)
 
     hydrocarbon = (sand > 0.5) & reservoir & (tvdss < OWC_TVDSS)
@@ -311,17 +395,28 @@ def generate(out_dir: Path, seed: int = 42) -> SampleField:
         wells_csv=out_dir / "wells.csv",
         wells_xlsx=out_dir / "wells.xlsx",
         las_dir=las_dir,
+        surveys_csv=out_dir / "surveys.csv",
+        tops_csv=out_dir / "tops.csv",
     )
     write_structure_raster(result.structure_top)
     write_field_boundary(result.field_boundary)
     result.wells = make_well_headers(rng)
     write_well_tables(result.wells, result.wells_csv, result.wells_xlsx)
+    write_surveys(result.wells, result.surveys_csv)
+    write_tops(result.wells, result.tops_csv)
 
     for i, well in enumerate(result.wells):
         number = i + 1
         las_name = WELL_NAME_STYLES[i % len(WELL_NAME_STYLES)].format(number)
-        top_md = well.top_tvdss + well.kb
-        logs = synthetic_logs(rng, top_md, well.kb, start_md=top_md - 300.0, stop_md=well.td_md)
+        top_md = well.top_md
+        logs = synthetic_logs(
+            rng,
+            well.top_tvdss,
+            well.kb,
+            start_md=top_md - 300.0,
+            stop_md=well.td_md,
+            trajectory=well.trajectory() if well.survey else None,
+        )
         if i in (2, 6):
             # A density gap (pad/tool failure) so null handling gets exercised.
             gap = (logs["DEPT"] > top_md - 120.0) & (logs["DEPT"] < top_md - 110.0)
@@ -330,7 +425,7 @@ def generate(out_dir: Path, seed: int = 42) -> SampleField:
         write_las(path, las_name, well.uwi, logs, variant=i)
         result.las_files.append(path)
 
-    offset_logs = synthetic_logs(rng, 1900.0, 25.0, start_md=1600.0, stop_md=2100.0)
+    offset_logs = synthetic_logs(rng, 1875.0, 25.0, start_md=1600.0, stop_md=2100.0)
     offset_path = las_dir / "OFFSET_1.las"
     write_las(offset_path, "OFFSET-1", "AZ-OFF-0001", offset_logs, variant=0)
     result.las_files.append(offset_path)
@@ -344,7 +439,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     result = generate(args.out, args.seed)
     print(f"Wrote synthetic field to {result.out_dir.resolve()}")
-    for path in (result.structure_top, result.field_boundary, result.wells_csv, result.wells_xlsx):
+    for path in (
+        result.structure_top,
+        result.field_boundary,
+        result.wells_csv,
+        result.wells_xlsx,
+        result.surveys_csv,
+        result.tops_csv,
+    ):
         print(f"  {path.name}")
     print(f"  las/ ({len(result.las_files)} files)")
     return 0

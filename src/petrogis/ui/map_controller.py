@@ -65,7 +65,7 @@ class MapController(QObject):
             self.canvas.set_layer_visible(layer_id, layer.visible)
             if layer.visible and isinstance(layer, RasterLayer):
                 self.request_raster(layer)
-        elif field == "style":
+        elif field in ("style", "trajectories"):
             self.canvas.update_layer_style(layer)
 
     def _on_cleared(self) -> None:
@@ -107,6 +107,8 @@ class MapController(QObject):
             extent,
             size,
             layer.band,
+            assume_crs=layer.assumed_crs,
+            transformation=self.project.transformation_for(layer.source_crs, self.project.crs),
             on_result=apply,
             on_error=failed,
         )

@@ -9,27 +9,32 @@ The import runs in two steps so the UI can step in between:
 
 from __future__ import annotations
 
-import csv
 import logging
-import re
-import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from petrogis.core.crs import crs_equal, normalize_crs
+from petrogis.core.crs import normalize_crs
 from petrogis.core.layers import WellLayer
 from petrogis.core.wells import normalize_well_name
 from petrogis.io.errors import DataReadError
+from petrogis.io.reproject import TransformationLookup, reproject_frame, resolve_transformation
+from petrogis.io.tables import (
+    TABLE_EXTENSIONS,
+    detect_fields,
+    normalize_header,
+    read_table,
+    to_numbers,
+)
 
 if TYPE_CHECKING:
     import pandas as pd
 
 log = logging.getLogger(__name__)
 
-WELL_TABLE_EXTENSIONS = {".csv", ".txt", ".xlsx", ".xlsm"}
+WELL_TABLE_EXTENSIONS = TABLE_EXTENSIONS
 WELL_TABLE_FILE_FILTER = "Well headers (*.csv *.txt *.xlsx *.xlsm)"
 GEOGRAPHIC_CRS = "EPSG:4326"
 
@@ -47,23 +52,20 @@ FIELD_LABELS = {
 # Normalised header aliases (lowercase, alphanumerics only, units in brackets removed), in
 # priority order.
 COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
-    "name": ("well", "wellname", "name", "wellid", "borehole", "boreholename", "wellbore", "bore"),
+    "name": ("well", "wellname", "name", "wellid", "borehole", "boreholename", "wellbore", "bore",
+             "quyu", "quyuadi", "quyununadi", "quyunomresi",  # Azerbaijani
+             "скважина", "скв", "номерскважины", "skvazhina", "skv"),  # Russian
     "uwi": ("uwi", "api", "apinumber", "uwiapi", "wellidentifier"),
     "x": ("x", "easting", "east", "xcoord", "xcoordinate", "surfacex", "xsurface", "eastings",
           "lon", "long", "longitude"),
     "y": ("y", "northing", "north", "ycoord", "ycoordinate", "surfacey", "ysurface", "northings",
           "lat", "latitude"),
     "kb": ("kb", "kbelev", "kbelevation", "elevkb", "rkb", "kellybushing", "elevation", "elev",
-           "datum", "datumelevation", "z"),
-    "td": ("td", "totaldepth", "tdmd", "mdtd", "drillertd"),
+           "datum", "datumelevation", "z", "альтитуда", "альтитударотора", "altituda", "altitud"),
+    "td": ("td", "totaldepth", "tdmd", "mdtd", "drillertd", "забой", "глубиназабоя", "zaboy"),
 }  # fmt: skip
 _GEOGRAPHIC_HEADERS = {"lon", "long", "longitude", "lat", "latitude"}
-_UNITS = re.compile(r"\(.*?\)|\[.*?\]")
-_NON_ALNUM = re.compile(r"[^a-z0-9]")
-
-
-def normalize_header(header: object) -> str:
-    return _NON_ALNUM.sub("", _UNITS.sub("", str(header).lower()))
+__all__ = ["normalize_header"]  # re-exported: older callers import it from here
 
 
 @dataclass
@@ -114,30 +116,11 @@ class WellImportResult:
 
 def detect_columns(columns: list[str]) -> ColumnMapping:
     """Match headers to well fields by normalised aliases. Each column is used at most once."""
-    normalized = {col: normalize_header(col) for col in columns}
-    used: set[str] = set()
-    mapping = ColumnMapping()
-    for field_name in ("uwi", "name", "x", "y", "kb", "td"):
-        for alias in COLUMN_ALIASES[field_name]:
-            match = next(
-                (c for c in columns if c not in used and normalized[c] == normalize_header(alias)),
-                None,
-            )
-            if match is not None:
-                setattr(mapping, field_name, match)
-                used.add(match)
-                break
+    found = detect_fields(columns, COLUMN_ALIASES, ("uwi", "name", "x", "y", "kb", "td"))
+    mapping = ColumnMapping(**found)
     if mapping.name is None and mapping.uwi is not None:
         mapping.name = mapping.uwi  # A UWI is better than no identifier at all.
     return mapping
-
-
-def _sniff_delimiter(path: Path) -> str:
-    sample = path.read_text(encoding="utf-8-sig", errors="replace")[:8192]
-    try:
-        return csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
-    except csv.Error:
-        return ","
 
 
 def list_sheets(path: str | Path) -> list[str]:
@@ -155,55 +138,31 @@ def list_sheets(path: str | Path) -> list[str]:
 
 
 def read_well_table(path: str | Path, sheet: str | None = None) -> WellTable:
-    import pandas as pd
-
     path = Path(path)
-    if not path.exists():
-        raise DataReadError(f"File not found: {path}")
-    suffix = path.suffix.lower()
-    if suffix not in WELL_TABLE_EXTENSIONS:
-        raise DataReadError(f"Unsupported well header format: {path.suffix or path.name}")
-    read_warnings: list[str] = []
-    try:
-        if suffix in {".xlsx", ".xlsm"}:
-            data = pd.read_excel(path, sheet_name=sheet or 0, engine="openpyxl")
-        else:
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always", pd.errors.ParserWarning)
-                # index_col=False: never turn surplus cells in ragged rows into a row index.
-                data = pd.read_csv(
-                    path, sep=_sniff_delimiter(path), encoding="utf-8-sig", index_col=False
-                )
-            if any(issubclass(w.category, pd.errors.ParserWarning) for w in caught):
-                read_warnings.append(
-                    "Some rows have more cells than the header; the extra cells were ignored"
-                )
-    except Exception as exc:  # pandas/openpyxl parse errors vary
-        raise DataReadError(f"Cannot read {path.name}: {exc}") from exc
-    if data.empty:
-        raise DataReadError(f"{path.name} contains no rows")
-    data = data.reset_index(drop=True)
-    data.columns = [str(c).strip() for c in data.columns]
+    data, read_warnings = read_table(path, sheet, what="well header")
     mapping = detect_columns(list(data.columns))
     return WellTable(path, data, sheet, mapping, _suggest_crs(data, mapping), read_warnings)
 
 
 def _suggest_crs(data: pd.DataFrame, mapping: ColumnMapping) -> str | None:
-    import pandas as pd
 
     if mapping.x is None or mapping.y is None:
         return None
     if {normalize_header(mapping.x), normalize_header(mapping.y)} & _GEOGRAPHIC_HEADERS:
         return GEOGRAPHIC_CRS
-    x = pd.to_numeric(data[mapping.x], errors="coerce").dropna()
-    y = pd.to_numeric(data[mapping.y], errors="coerce").dropna()
+    x = to_numbers(data[mapping.x]).dropna()
+    y = to_numbers(data[mapping.y]).dropna()
     if len(x) and len(y) and x.abs().max() <= 180 and y.abs().max() <= 90:
         return GEOGRAPHIC_CRS
     return None
 
 
 def build_well_layer(
-    table: WellTable, mapping: ColumnMapping, source_crs: str, project_crs: str
+    table: WellTable,
+    mapping: ColumnMapping,
+    source_crs: str,
+    project_crs: str,
+    transformation: str | TransformationLookup | None = None,
 ) -> WellImportResult:
     """Validate rows, reproject to ``project_crs`` and build the layer. Bad rows become warnings."""
     import geopandas as gpd
@@ -222,8 +181,8 @@ def build_well_layer(
     df = table.data
     messages: list[str] = list(table.read_warnings)
     names = df[mapping.name].astype("string").str.strip()
-    x = pd.to_numeric(df[mapping.x], errors="coerce")
-    y = pd.to_numeric(df[mapping.y], errors="coerce")
+    x = to_numbers(df[mapping.x])
+    y = to_numbers(df[mapping.y])
     valid = names.notna() & (names != "") & x.notna() & y.notna()
     if not valid.all():
         # Positional, so the report is right whatever index the frame carries (+2: header, 1-based).
@@ -238,7 +197,7 @@ def build_well_layer(
     def numeric(col: str | None) -> pd.Series:
         if col is None:
             return pd.Series(float("nan"), index=df.index)
-        return pd.to_numeric(df[col], errors="coerce")
+        return to_numbers(df[col])
 
     mapped = {mapping.name, mapping.x, mapping.y, mapping.kb, mapping.uwi, mapping.td}
     extras = df[[c for c in df.columns if c not in mapped]]
@@ -264,8 +223,7 @@ def build_well_layer(
         geometry=gpd.points_from_xy(x[valid], y[valid]),
         crs=source_crs,
     )
-    if not crs_equal(source_crs, project_crs):
-        gdf = gdf.to_crs(project_crs)
+    gdf = reproject_frame(gdf, project_crs, resolve_transformation(transformation, source_crs))
     for message in messages:
         log.warning("%s: %s", table.path.name, message)
 
@@ -273,6 +231,7 @@ def build_well_layer(
         name=table.path.stem,
         source=str(table.path),
         gdf=gdf,
+        source_crs=source_crs,
         import_options={
             "mapping": mapping.to_dict(),
             "source_crs": source_crs,
@@ -288,6 +247,7 @@ def load_well_layer(
     mapping: ColumnMapping | None = None,
     source_crs: str | None = None,
     sheet: str | None = None,
+    transformation: str | TransformationLookup | None = None,
 ) -> WellImportResult:
     """One-shot import, for scripts and project loading. Raises if detection is incomplete."""
     table = read_well_table(path, sheet)
@@ -297,5 +257,9 @@ def load_well_layer(
             f"Could not detect the well name and coordinate columns in {Path(path).name}"
         )
     return build_well_layer(
-        table, mapping, source_crs or table.suggested_crs or project_crs, project_crs
+        table,
+        mapping,
+        source_crs or table.suggested_crs or project_crs,
+        project_crs,
+        transformation,
     )

@@ -58,7 +58,16 @@ Then load the demo:
 3. **Layers → Import Wells…** → `sample_data/wells.csv`
 4. **Layers → Import LAS Logs…** → select every file in `sample_data/las/`. `OFFSET_1.las` is a
    deliberately unmatched offset well and is reported as such.
-5. Click a well to open its logs. Use **File → Save Project As…** to save the session.
+5. **Layers → Import Deviation Surveys…** → `sample_data/surveys.csv` (AB-04 and AB-06 are
+   deviated), then **Layers → Import Formation Tops…** → `sample_data/tops.csv`.
+6. Click a well to open its logs. Switch the depth axis to TVD or TVDSS, and see the tops across
+   the tracks.
+7. Ctrl+click (⌘+click on macOS) several wells on the map to build a correlation section, then
+   choose **Flatten on → Top Reservoir**. Switch on **Pick** to pick or move tops by clicking a
+   track.
+8. **Processing → Raster → Zonal statistics** on the field boundary and the structure raster gives
+   the depth range inside the closure; **Sample raster at wells** writes the structure depth at
+   every well. Use **File → Save Project As…** to save the session.
 
 To open a saved project directly:
 
@@ -76,6 +85,8 @@ uv run petrogis path/to/project.pgis
 | Pan / Zoom box / Identify mode | P / Z / I |
 | Zoom to layer / full extent | Ctrl+Shift+L / Ctrl+Shift+F |
 | Open attribute table | F6 |
+| Correlate wells selected in the attribute table | Ctrl+Shift+K |
+| Add or remove a well in the correlation section | Ctrl+click on the map |
 | Clear selection highlight | Esc |
 | Remove selected layer (in layer panel) | Delete |
 

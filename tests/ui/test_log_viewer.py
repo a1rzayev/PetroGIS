@@ -54,7 +54,12 @@ def test_missing_curve_and_multiple_sources(viewer):
     viewer.show_well("X-1", [only_gr, neg_res])
     assert viewer.source_combo.isVisible() and viewer.source_combo.count() == 2
     assert viewer.res_plot.getAxis("top").labelText == "RES_DEEP (missing)"
-    assert viewer.gr_plot.getAxis("left").labelText == "MD (FT)"
+    assert viewer.gr_plot.getAxis("left").labelText == "MD (m)"
+    _, y = viewer.gr_curve.getData()
+    assert y[0] == pytest.approx(1000.0 * 0.3048)  # feet logs are converted to the chosen unit
+    viewer.unit_combo.setCurrentText("ft")
+    assert viewer.gr_plot.getAxis("left").labelText == "MD (ft)"
+    assert viewer.gr_curve.getData()[1][0] == pytest.approx(1000.0)
     viewer.source_combo.setCurrentIndex(1)
     assert viewer.current is neg_res
     x, _ = viewer.res_curve.getData()

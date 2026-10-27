@@ -98,3 +98,43 @@ def match_logs(logs: list[WellLog], wells: WellLayer) -> LogMatch:
         else:
             result.matched.setdefault(key, []).append(log)
     return result
+
+
+FEET_UNITS = {"F", "FT", "FEET", "FOOT", "'"}
+METRES_PER_FOOT = 0.3048
+
+
+def metres_per_unit(unit: str) -> float:
+    """Conversion factor for a LAS depth unit: 0.3048 for feet, 1 for metres (or unknown)."""
+    return METRES_PER_FOOT if unit.strip().upper().rstrip(".") in FEET_UNITS else 1.0
+
+
+def minmax_decimate(
+    depth: NDArray[np.float64], values: NDArray[np.float64], max_bins: int
+) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """Reduce a curve to at most ``2 * max_bins`` points without losing spikes.
+
+    Samples are split into ``max_bins`` consecutive runs, and each run keeps its minimum and
+    maximum value, in depth order, so a thin bed still shows at full amplitude. Curves with fewer
+    samples are returned unchanged. Bins whose values are all NaN keep one NaN, so gaps stay gaps.
+    """
+    n = depth.size
+    if n <= 2 * max_bins or max_bins < 1:
+        return depth, values
+    edges = np.linspace(0, n, max_bins + 1).astype(int)
+    size = int(np.diff(edges).max())
+    # Pad every run to the same length so the min/max search is one vectorised call.
+    index = edges[:-1, None] + np.arange(size)[None, :]
+    valid = index < edges[1:, None]
+    index = np.minimum(index, n - 1)
+    block = np.where(valid, values[index], np.nan)
+    all_nan = np.isnan(block).all(axis=1)
+    filled_low = np.where(np.isnan(block), np.inf, block)
+    filled_high = np.where(np.isnan(block), -np.inf, block)
+    low = index[np.arange(max_bins), filled_low.argmin(axis=1)]
+    high = index[np.arange(max_bins), filled_high.argmax(axis=1)]
+    first, second = np.minimum(low, high), np.maximum(low, high)
+    picks = np.column_stack([first, second]).ravel()
+    out_values = values[picks].astype(np.float64)
+    out_values[np.repeat(all_nan, 2)] = np.nan
+    return depth[picks], out_values

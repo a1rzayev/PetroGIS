@@ -59,10 +59,20 @@ def test_log_viewer_header_and_axis_labels(qtbot):
     viewer.show_well(PAYLOAD, [log], uwi=PAYLOAD)
     assert_escaped(viewer.header.text())
     assert_escaped(viewer.gr_plot.getAxis("top").labelText)
-    assert_escaped(viewer.gr_plot.getAxis("left").labelText)
+    assert "<img" not in viewer.gr_plot.getAxis("left").labelText  # unit comes from the combo
 
     viewer.show_well(PAYLOAD, [])
     assert_escaped(viewer.header.text())
+
+    from petrogis.core.tops import Top
+
+    viewer.show_well("W", [log], tops=[Top(PAYLOAD, "W", PAYLOAD + "{value}", 1005.0)])
+    import pyqtgraph as pg
+
+    line = viewer._top_lines[0][1]
+    label = next(c for c in line.childItems() if isinstance(c, pg.InfLineLabel))
+    assert label.toPlainText() == PAYLOAD + "{value}"  # literal: no markup, no formatting
+    assert_escaped(label.toHtml())
 
 
 @pytest.mark.parametrize("show", ["error", "warning"])

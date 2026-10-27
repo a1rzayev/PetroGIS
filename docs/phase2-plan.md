@@ -120,6 +120,12 @@ the `types` job becomes blocking, are still open. See ROADMAP.md.
 
 ### P2.1 Layer registry, CRS and data import robustness
 
+**Status: done.** The done criterion is `tests/io/test_reprojection.py::test_round_trip_through_pulkovo_is_identical`
+(UTM 39N → Pulkovo 1942 / GK zone 9 → UTM 39N within 1 cm) together with the decimal-comma import tests.
+Rasters with an explicit pipeline are warped in numpy, because rasterio upper-cases warp options and
+breaks PROJ pipeline strings. Stored pipelines are only accepted if PROJ itself offers them for that
+CRS pair.
+
 - The layer-type registry from [phase2.md §0](phase2.md#0-prerequisite-a-layer-type-registry),
   replacing the `isinstance` dispatch in the canvas, project IO and style dialogs.
 - Searchable CRS picker over the PROJ database. Change the project CRS with layers loaded (re-read
@@ -134,6 +140,15 @@ the `types` job becomes blocking, are still open. See ROADMAP.md.
 
 ### P2.2 Expressions and styling
 
+**Status: lite done** (MVP scope: expressions, categorized and graduated renderers, polygon fill,
+labels for any layer, legend, well status symbols). The done criterion holds:
+`tests/core/test_expressions.py` covers the grammar with two hypothesis fuzzers (random text and
+random grammar trees), and `tests/render/test_styling_render.py` renders a 100k-point graduated
+layer in about 0.4 s (budget 2 s). Rule-based styles, hillshade and `.pgstyle` files remain for Beta.
+Expressions are evaluated column-wise over pandas nullable dtypes. `LIKE` uses a hand-written
+matcher instead of regexes, so hostile patterns cannot backtrack exponentially. An invalid style in
+a project file is replaced by the default style with a warning, and the layer still loads.
+
 - Expression engine (Qt-free, in `core/expressions/`): tokenizer, parser to an AST, evaluator over
   pandas columns (vectorised where possible), and a whitelisted function library (math, string,
   conditional, geometry area/length). Limits on size, depth and steps. No Python evaluation.
@@ -146,7 +161,27 @@ the `types` job becomes blocking, are still open. See ROADMAP.md.
 - **Done when:** expression tests cover the grammar with fuzzing, and a 100k-feature graduated
   layer renders within budget.
 
+### Correlation panel (MVP addition)
+
+**Status: done.** A dock shows the section's wells side by side on one linked depth axis (TVDSS,
+TVD or MD), optionally flattened on a surface. Correlation lines join the same surface in
+neighbouring wells. Track templates hold up to 8 tracks of up to 4 curves, each with its own
+scale in the track's normalised width, with log tracks, GR sand and neutron–density crossover
+shading; three are built in and a table editor makes custom ones. Picks are made by clicking a
+track (Shift+click removes), converted back to MD through the trajectory and KB, and stored as
+overrides in the project file (format version 3), so moved or deleted file picks persist. Wells
+come from a checklist dialog, Ctrl+click on the map, or the attribute table selection.
+
 ### P2.6a Wells in depth: trajectories and tops
+
+**Status: done.** Minimum curvature is tested against an analytic circular arc (exact), a
+hand-computed worked example, vertical and straight-inclined wells. Surveys and tops use the
+detect-then-map import; tops also read the wide layout (one column per surface). The log viewer
+shows MD, TVD or TVDSS in metres or feet, tops across all tracks, GR sand and neutron–density
+crossover shading, per-track scales, and min-max decimation of long logs. "Create Tops Map Layer"
+writes a surface's picks (with TVDSS at the pick's XY) to a GeoPackage, the input to gridding.
+`.pgis` version 2 adds well `surveys` and `tops`, and version 1 files still load. The demo field
+has two deviated wells with consistent logs and tops. Track templates move to the correlation panel.
 
 Design in [phase2.md §1–2](phase2.md#1-deviation-surveys-and-trajectories-minimum-curvature).
 
@@ -174,6 +209,16 @@ Design in [phase2.md §1–2](phase2.md#1-deviation-surveys-and-trajectories-min
   atomically, and a failed write never corrupts the source.
 
 ### P2.5 Processing framework
+
+**Status: lite done.** `analysis/processing.py` holds the registry, typed parameters (layer with
+kind and geometry filters, number, choice, boolean, CRS, output file), validation, a thread-safe
+`Feedback` for progress and cooperative cancel, and `execute`, which deletes partial outputs of a
+failed or cancelled run. Six algorithms ship: sample raster at wells (wellhead or bottom hole),
+clip vector, clip raster, reproject vector, reproject raster (block-wise) and zonal statistics.
+Raster work is in `io/raster_ops.py` and honours the project's explicit datum transformations.
+The Processing menu opens generated, non-modal dialogs; runs go through the `TaskRunner`, outputs
+load back as layers, and every run is appended to a per-user JSON-lines history with Run Again.
+Batch mode and the full library are the Beta "P2.5 rest".
 
 - `analysis/` algorithm registry with typed parameters and generated parameter dialogs. Runs in the
   background with progress and cancel. History panel and batch mode.

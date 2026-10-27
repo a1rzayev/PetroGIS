@@ -15,6 +15,7 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from petrogis.core.styles import RasterStyle, VectorStyle, WellStyle
+from petrogis.io.delimited_io import load_delimited_layer
 from petrogis.io.errors import DataReadError
 from petrogis.io.las_io import read_las
 from petrogis.io.project_io import load_project
@@ -32,7 +33,7 @@ json_values = st.recursive(
 )
 layer_keys = st.sampled_from(
     ["id", "kind", "name", "visible", "source", "source_abs", "style", "band", "source_layer",
-     "assume_crs", "import_options", "logs"]
+     "assume_crs", "encoding", "import_options", "logs"]
 )  # fmt: skip
 layer_entries = st.dictionaries(layer_keys, json_values, max_size=8) | json_values
 
@@ -121,7 +122,7 @@ def test_project_loader_fails_cleanly_on_any_json(document):
 
 @SETTINGS
 @given(
-    st.dictionaries(st.sampled_from(["crs", "view", "version"]), json_values),
+    st.dictionaries(st.sampled_from(["crs", "view", "version", "transformations"]), json_values),
     st.lists(layer_entries, max_size=5),
 )
 def test_project_loader_skips_bad_layers_with_warnings(top, layers):
@@ -145,3 +146,73 @@ def test_styles_reject_bad_values_with_value_error(data):
     for cls in (VectorStyle, RasterStyle, WellStyle):
         with contextlib.suppress(ValueError):
             cls.from_dict(data)
+
+
+@SETTINGS
+@given(
+    headers,
+    st.lists(st.lists(csv_cells, max_size=7), max_size=8),
+    st.sampled_from([",", ";", "\t"]),
+)
+def test_delimited_import_fails_cleanly(header, rows, sep):
+    text = "\n".join([sep.join(header), *(sep.join(row) for row in rows)])
+    path = _write(".csv", text)
+    try:
+        result = load_delimited_layer(path, UTM)
+    except DataReadError:
+        return
+    assert len(result.layer.gdf) >= 1
+
+
+# --- surveys and tops ------------------------------------------------------------------------
+survey_headers = st.lists(
+    st.sampled_from(["Well", "MD", "MD (ft)", "Inc", "Azi", "Depth", "Surface", "Formation",
+                     "Top Reservoir", "Foo", ""]),
+    min_size=1, max_size=5,
+)  # fmt: skip
+
+
+@SETTINGS
+@given(
+    survey_headers,
+    st.lists(st.lists(csv_cells, max_size=6), max_size=10),
+    st.sampled_from([",", ";", "\t"]),
+)
+def test_survey_and_tops_import_fail_cleanly(header, rows, sep):
+    from petrogis.io.survey_io import load_surveys
+    from petrogis.io.tops_io import load_tops
+
+    text = "\n".join([sep.join(header), *(sep.join(row) for row in rows)])
+    path = _write(".csv", text)
+    for load in (load_surveys, load_tops):
+        try:
+            result = load(path)
+        except DataReadError:
+            continue
+        assert result.names
+
+
+@SETTINGS
+@given(json_values | st.dictionaries(
+    st.sampled_from(["layer_id", "wells", "template", "datum", "flatten_on"]), json_values,
+    max_size=5,
+))  # fmt: skip
+def test_correlation_sections_reject_bad_values_with_value_error(data):
+    from petrogis.core.correlation import CorrelationSection
+
+    if not isinstance(data, dict):
+        return
+    with contextlib.suppress(ValueError):
+        CorrelationSection.from_dict(data)
+
+
+@SETTINGS
+@given(st.binary(max_size=3000) | st.lists(json_values, max_size=6).map(
+    lambda items: "\n".join(json.dumps(i) for i in items).encode()
+))  # fmt: skip
+def test_processing_history_never_fails(data):
+    from petrogis.io.processing_history import ProcessingHistory
+
+    path = _write(".jsonl", data)
+    entries = ProcessingHistory(path).entries()
+    assert all(e.status in ("ok", "failed", "canceled") for e in entries)
