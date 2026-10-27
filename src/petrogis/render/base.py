@@ -15,6 +15,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Protocol
 
+from numpy.typing import ArrayLike
+
 from petrogis.core.extent import Extent
 from petrogis.core.layers import Layer, RasterLayer
 from petrogis.io.raster_io import RasterView
@@ -23,6 +25,7 @@ from petrogis.io.raster_io import RasterView
 class MouseMode(StrEnum):
     PAN = "pan"
     ZOOM_BOX = "zoom_box"
+    IDENTIFY = "identify"
 
 
 class MapRenderer(Protocol):
@@ -49,3 +52,5 @@ class MapRenderer(Protocol):
     def zoom_by(self, factor: float) -> None: ...
 
     def set_mouse_mode(self, mode: MouseMode) -> None: ...
+
+    def set_highlight(self, geometries: ArrayLike | None) -> None: ...

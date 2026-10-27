@@ -28,6 +28,7 @@ class LayerPanel(QListWidget):
     zoom_to_layer_requested = Signal(str)
     style_requested = Signal(str)
     remove_requested = Signal(str)
+    attribute_table_requested = Signal(str)
 
     def __init__(
         self, project: Project, bridge: ProjectBridge, parent: QWidget | None = None
@@ -184,6 +185,10 @@ class LayerPanel(QListWidget):
         menu = QMenu(self)
         menu.addAction("Zoom to Layer", lambda: self.zoom_to_layer_requested.emit(layer_id))
         menu.addAction("Style…", lambda: self.style_requested.emit(layer_id))
+        if self.project.get(layer_id).kind is not LayerKind.RASTER:
+            menu.addAction(
+                "Open Attribute Table", lambda: self.attribute_table_requested.emit(layer_id)
+            )
         menu.addAction("Rename", lambda: self.editItem(item))
         menu.addSeparator()
         menu.addAction("Remove", lambda: self.remove_requested.emit(layer_id))

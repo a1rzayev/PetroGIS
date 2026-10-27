@@ -156,3 +156,27 @@ def load_raster_layer(
     path = Path(path)
     info = read_raster_info(path, project_crs, band=band)
     return RasterLayer(name=name or path.stem, source=str(path), info=info, band=band)
+
+
+def sample_raster(
+    path: str | Path, project_crs: str, x: float, y: float, band: int = 1
+) -> float | None:
+    """Value of the pixel at project-CRS point (x, y), or ``None`` outside the raster or nodata."""
+    from rasterio.warp import transform as warp_transform
+
+    path = Path(path)
+    with _open(path) as src:
+        if src.crs is None:
+            raise MissingCRSError(f"{path.name} has no coordinate reference system defined")
+        if not crs_equal(src.crs, project_crs):
+            xs, ys = warp_transform(project_crs, src.crs, [x], [y])
+            x, y = xs[0], ys[0]
+        row, col = src.index(x, y)
+        if not (0 <= row < src.height and 0 <= col < src.width):
+            return None
+        from rasterio.windows import Window
+
+        value = src.read(band, window=Window(col, row, 1, 1), masked=True)[0, 0]
+    if np.ma.is_masked(value) or not np.isfinite(value):
+        return None
+    return float(value)

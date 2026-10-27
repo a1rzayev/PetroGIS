@@ -13,7 +13,7 @@
 - [x] M4 — Wells: CSV/Excel header import, column auto-detection, mapping dialog, symbols + LOD labels
 - [x] M5 — LAS logs: batch import, name matching, mnemonic aliases, log viewer dock
       (GR | resistivity log-scale | NPHI+RHOB, shared inverted depth)
-- [ ] M6 — Identify tool + attribute table dock
+- [x] M6 — Identify tool + attribute table dock
 - [ ] M7 — Project save/open (.pgis) + recent projects
 - [ ] M8 — Hardening: error paths, clean-checkout test run, definition-of-done walkthrough
 - [ ] M9 — Docs polish, Phase 2 notes

@@ -20,14 +20,16 @@ from PySide6.QtWidgets import (
 )
 
 from petrogis import __version__
+from petrogis.core.attributes import IdentifyHit, identify
 from petrogis.core.crs import CRSError, crs_label, normalize_crs
-from petrogis.core.layers import Layer, RasterLayer, VectorLayer, WellLayer
+from petrogis.core.extent import Extent
+from petrogis.core.layers import FeatureLayer, Layer, RasterLayer, VectorLayer, WellLayer
 from petrogis.core.logs import match_logs
 from petrogis.core.project import Project
 from petrogis.core.styles import VECTOR_PALETTE
 from petrogis.io.errors import MissingCRSError
 from petrogis.io.las_io import LAS_FILE_FILTER, LasBatch, read_las_files
-from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer
+from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer, sample_raster
 from petrogis.io.vector_io import VECTOR_FILE_FILTER, list_layers, load_vector_layer
 from petrogis.io.wells_io import (
     WELL_TABLE_FILE_FILTER,
@@ -40,12 +42,14 @@ from petrogis.io.wells_io import (
 )
 from petrogis.render.base import MouseMode
 from petrogis.render.pg.canvas import PgMapCanvas
+from petrogis.ui.attribute_table import AttributeTable
 from petrogis.ui.dialogs.column_mapping import ask_column_mapping
 from petrogis.ui.dialogs.layer_picker import pick_layers
 from petrogis.ui.dialogs.style_raster import edit_raster_style
 from petrogis.ui.dialogs.style_vector import edit_vector_style
 from petrogis.ui.dialogs.style_wells import edit_well_style
 from petrogis.ui.errors import show_error, show_warning
+from petrogis.ui.identify import IdentifyDialog
 from petrogis.ui.layer_panel import LayerPanel
 from petrogis.ui.log_viewer import LogViewer
 from petrogis.ui.map_controller import MapController
@@ -94,6 +98,23 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.log_dock)
         self.log_dock.hide()
         self.canvas.clicked.connect(self.on_map_clicked)
+
+        self.attribute_table = AttributeTable()
+        self.attribute_dock = QDockWidget("Attributes", self)
+        self.attribute_dock.setObjectName("AttributesDock")
+        self.attribute_dock.setWidget(self.attribute_table)
+        self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.attribute_dock)
+        self.attribute_dock.hide()
+        self.attribute_table.selection_changed.connect(self._highlight_table_selection)
+        self.attribute_table.zoom_requested.connect(self._zoom_to_table_rows)
+        self.layer_panel.attribute_table_requested.connect(self.open_attribute_table)
+        self.bridge.layer_removed.connect(self._on_layer_removed)
+        self.bridge.layer_changed.connect(self._on_layer_changed)
+        self.bridge.cleared.connect(lambda: self._on_layer_removed(self.attribute_table.layer_id))
+
+        self.identify_dialog = IdentifyDialog(self)
+        self.identify_dialog.hit_selected.connect(self._highlight_hit)
+        self._identify_token = 0
 
         self._build_actions()
         self._build_menus()
@@ -151,8 +172,17 @@ class MainWindow(QMainWindow):
         self.zoom_box_action = self._action(
             "&Zoom Box", lambda: self.canvas.set_mouse_mode(MouseMode.ZOOM_BOX), "Z"
         )
+        self.identify_action = self._action(
+            "&Identify", lambda: self.canvas.set_mouse_mode(MouseMode.IDENTIFY), "I"
+        )
+        self.attribute_table_action = self._action(
+            "Open &Attribute Table", lambda: self._with_current(self.open_attribute_table), "F6"
+        )
+        self.clear_highlight_action = self._action(
+            "Clear Selection", lambda: self.canvas.set_highlight(None), "Esc"
+        )
         mode_group = QActionGroup(self)
-        for action in (self.pan_action, self.zoom_box_action):
+        for action in (self.pan_action, self.zoom_box_action, self.identify_action):
             action.setCheckable(True)
             mode_group.addAction(action)
         self.pan_action.setChecked(True)
@@ -174,11 +204,17 @@ class MainWindow(QMainWindow):
         )
         layers_menu.addSeparator()
         layers_menu.addActions(
-            [self.style_action, self.zoom_layer_action, self.remove_layer_action]
+            [
+                self.style_action,
+                self.attribute_table_action,
+                self.zoom_layer_action,
+                self.remove_layer_action,
+            ]
         )
 
         view_menu = bar.addMenu("&View")
-        view_menu.addActions([self.pan_action, self.zoom_box_action])
+        view_menu.addActions([self.pan_action, self.zoom_box_action, self.identify_action])
+        view_menu.addAction(self.clear_highlight_action)
         view_menu.addSeparator()
         view_menu.addActions(
             [
@@ -191,6 +227,7 @@ class MainWindow(QMainWindow):
         view_menu.addSeparator()
         view_menu.addAction(self.layer_dock.toggleViewAction())
         view_menu.addAction(self.log_dock.toggleViewAction())
+        view_menu.addAction(self.attribute_dock.toggleViewAction())
 
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.about_action)
@@ -208,7 +245,7 @@ class MainWindow(QMainWindow):
             ]
         )
         toolbar.addSeparator()
-        toolbar.addActions([self.pan_action, self.zoom_box_action])
+        toolbar.addActions([self.pan_action, self.zoom_box_action, self.identify_action])
         toolbar.addSeparator()
         toolbar.addActions([self.zoom_full_action, self.zoom_layer_action])
         self.addToolBar(toolbar)
@@ -351,7 +388,10 @@ class MainWindow(QMainWindow):
             show_warning(self, "LAS import", summary + ".\n\n" + "\n".join(problems))
 
     def on_map_clicked(self, x: float, y: float) -> None:
-        """Open the log viewer for the nearest well under the cursor (topmost well layer first)."""
+        """Identify features in identify mode. Otherwise open the logs of a clicked well."""
+        if self.canvas.mouse_mode is MouseMode.IDENTIFY:
+            self.identify_at(x, y)
+            return
         tolerance = 8.0 * self.canvas.map_units_per_pixel()
         for layer in self.project.layers:
             if not (isinstance(layer, WellLayer) and layer.visible):
@@ -373,6 +413,87 @@ class MainWindow(QMainWindow):
         self.log_dock.show()
         if not logs:
             self.statusBar().showMessage(f"No logs loaded for {row['name']}", 4000)
+
+    # --- identify and attributes -------------------------------------------------------------
+    def identify_at(self, x: float, y: float) -> None:
+        hits = identify(self.project, x, y, 6.0 * self.canvas.map_units_per_pixel())
+        self.identify_dialog.show_results(x, y, hits)
+        if not hits:
+            self.canvas.set_highlight(None)
+        self.identify_dialog.show()
+        self.identify_dialog.raise_()
+        # Raster values are sampled in the background. A later click drops stale results.
+        self._identify_token += 1
+        token = self._identify_token
+        for layer in self.project.layers:
+            if not (isinstance(layer, RasterLayer) and layer.visible and layer.extent):
+                continue
+            e = layer.extent
+            if not (e.xmin <= x <= e.xmax and e.ymin <= y <= e.ymax):
+                continue
+            layer_id, name = layer.id, layer.name
+
+            def on_value(value: float | None, layer_id: str = layer_id, name: str = name) -> None:
+                if token == self._identify_token:
+                    self.identify_dialog.add_raster_value(layer_id, name, value)
+
+            self.tasks.submit(
+                sample_raster,
+                layer.source,
+                self.project.crs,
+                x,
+                y,
+                layer.band,
+                on_result=on_value,
+                on_error=lambda exc, s=layer.source: log.error(
+                    "Sampling %s failed", s, exc_info=exc
+                ),
+            )
+
+    def _highlight_hit(self, hit: IdentifyHit) -> None:
+        layer = self.project.get(hit.layer_id)
+        if isinstance(layer, FeatureLayer) and layer.gdf is not None:
+            self.canvas.set_highlight(layer.gdf.geometry.values[[hit.position]])
+
+    def open_attribute_table(self, layer_id: str) -> None:
+        layer = self.project.get(layer_id)
+        if not isinstance(layer, FeatureLayer):
+            self.statusBar().showMessage(f"{layer.name} has no attribute table", 3000)
+            return
+        self.attribute_table.set_layer(layer)
+        self.attribute_dock.setWindowTitle(f"Attributes – {layer.name}")
+        self.attribute_dock.show()
+
+    def _table_layer(self) -> FeatureLayer | None:
+        layer_id = self.attribute_table.layer_id
+        if layer_id is None:
+            return None
+        layer = self.project.get(layer_id)
+        return layer if isinstance(layer, FeatureLayer) and layer.gdf is not None else None
+
+    def _highlight_table_selection(self, positions: object) -> None:
+        layer = self._table_layer()
+        if layer is not None:
+            self.canvas.set_highlight(layer.gdf.geometry.values[positions])
+
+    def _zoom_to_table_rows(self, positions: object) -> None:
+        layer = self._table_layer()
+        if layer is None or not len(positions):  # type: ignore[arg-type]
+            return
+        import shapely
+
+        bounds = shapely.total_bounds(layer.gdf.geometry.values[positions])
+        self.canvas.set_view_extent(Extent.from_bounds(bounds).buffered(0.2, minimum=250.0))
+
+    def _on_layer_removed(self, layer_id: str | None) -> None:
+        if layer_id is not None and layer_id == self.attribute_table.layer_id:
+            self.attribute_table.set_layer(None)
+            self.attribute_dock.setWindowTitle("Attributes")
+            self.canvas.set_highlight(None)
+
+    def _on_layer_changed(self, layer_id: str, field: str) -> None:
+        if field == "name" and layer_id == self.attribute_table.layer_id:
+            self.attribute_dock.setWindowTitle(f"Attributes – {self.project.get(layer_id).name}")
 
     def add_vector_file(self, path: str | Path) -> None:
         """Load a vector file, asking which layers to load when it has more than one."""

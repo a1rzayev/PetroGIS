@@ -70,6 +70,12 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
 - Log viewer: one pyqtgraph track per family, with Y linked and inverted. Value scales are fixed
   (GR 0-150, deep resistivity 0.2-2000 log, NPHI 0.45 to -0.15 with RHOB 1.95-2.95 on a second
   ViewBox). Disable auto SI prefixes on track axes.
+- Identify and attributes: `core/attributes.py` (Qt-free) does value formatting, filtering,
+  sorting and `identify()`. The attribute table model is virtual. It formats visible cells only
+  and sorts and filters an array of row positions, never copying the frame. Map clicks open the
+  identify popup in Identify mode (I) and well logs otherwise. Raster values at the click are
+  sampled in the background with `io.raster_io.sample_raster`. The canvas selection overlay is
+  `canvas.set_highlight(geoms)`; Esc clears it.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

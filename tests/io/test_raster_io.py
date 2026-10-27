@@ -109,3 +109,26 @@ def test_large_raster_view_reads_are_fast(tmp_path):
     elapsed = time.perf_counter() - start
     assert view.data.shape == (1000, 1600)
     assert elapsed < 1.0, f"info + full view took {elapsed:.2f}s"
+
+
+def test_sample_raster(sample_field, tmp_path):
+    from petrogis.io.raster_io import sample_raster
+
+    crest = sample_raster(sample_field.structure_top, UTM, sd.CENTER_X, sd.CENTER_Y)
+    assert crest == pytest.approx(sd.CREST_TVDSS, abs=10)
+    info = read_raster_info(sample_field.structure_top, UTM)
+    e = info.extent
+    assert (
+        sample_raster(sample_field.structure_top, UTM, e.xmin + 10, e.ymax - 10) is None
+    )  # nodata
+    assert sample_raster(sample_field.structure_top, UTM, 0, 0) is None  # outside
+
+    path = tmp_path / "wgs84.tif"
+    with rasterio.open(
+        path, "w", driver="GTiff", width=10, height=10, count=1, dtype="float32",
+        crs="EPSG:4326", transform=from_origin(49.8, 40.45, 0.01, 0.01),
+    ) as dst:  # fmt: skip
+        dst.write(np.full((10, 10), 7.0, dtype=np.float32), 1)
+    layer = load_raster_layer(path, UTM)
+    cx, cy = layer.extent.center
+    assert sample_raster(path, UTM, cx, cy) == 7.0

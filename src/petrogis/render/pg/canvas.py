@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import pyqtgraph as pg
+from numpy.typing import ArrayLike
 from PySide6.QtCore import QPointF, Qt, QTimer, Signal
 from PySide6.QtWidgets import QWidget
 
@@ -12,7 +13,12 @@ from petrogis.core.extent import Extent
 from petrogis.core.layers import Layer, RasterLayer, VectorLayer, WellLayer
 from petrogis.io.raster_io import RasterView
 from petrogis.render.base import MouseMode
-from petrogis.render.pg.items import LayerGraphics, RasterGraphics, VectorGraphics
+from petrogis.render.pg.items import (
+    HighlightGraphics,
+    LayerGraphics,
+    RasterGraphics,
+    VectorGraphics,
+)
 from petrogis.render.pg.well_items import WellGraphics
 
 VIEW_CHANGE_DEBOUNCE_MS = 120
@@ -52,6 +58,10 @@ class PgMapCanvas(pg.PlotWidget):
         self._vb.disableAutoRange()
         self._vb.setMouseMode(pg.ViewBox.PanMode)
         self._layers: dict[str, LayerGraphics] = {}
+        self.mouse_mode = MouseMode.PAN
+        self._highlight = HighlightGraphics()
+        for item in self._highlight.items:
+            self.addItem(item)
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -133,9 +143,18 @@ class PgMapCanvas(pg.PlotWidget):
         self._vb.scaleBy((1.0 / factor, 1.0 / factor))
 
     def set_mouse_mode(self, mode: MouseMode) -> None:
+        self.mouse_mode = mode
         self._vb.setMouseMode(
             pg.ViewBox.RectMode if mode is MouseMode.ZOOM_BOX else pg.ViewBox.PanMode
         )
+        cursor = (
+            Qt.CursorShape.CrossCursor if mode is MouseMode.IDENTIFY else Qt.CursorShape.ArrowCursor
+        )
+        self.setCursor(cursor)
+
+    def set_highlight(self, geometries: ArrayLike | None) -> None:
+        """Draw ``geometries`` (project CRS) as a selection overlay. ``None`` clears it."""
+        self._highlight.set_geometries(geometries)
 
     def map_from_scene(self, pos: QPointF) -> tuple[float, float]:
         point = self._vb.mapSceneToView(pos)

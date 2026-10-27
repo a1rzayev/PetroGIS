@@ -12,10 +12,12 @@ from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
+from numpy.typing import ArrayLike
 from PySide6.QtCore import QRectF
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QGraphicsItem
 
+from petrogis.core.geometry import to_paths
 from petrogis.core.layers import RasterLayer, VectorLayer
 from petrogis.core.styles import RasterStyle
 from petrogis.io.raster_io import RasterView
@@ -106,3 +108,36 @@ class RasterGraphics(LayerGraphics):
         if layer.info is not None:
             self.image.setLevels(layer.value_range())
         self.set_opacity(style.opacity)
+
+
+HIGHLIGHT_Z = 1e6
+HIGHLIGHT_COLOR = "#00e5ff"
+
+
+class HighlightGraphics(LayerGraphics):
+    """Selection overlay: thick cyan outlines and rings, drawn above every layer."""
+
+    def __init__(self) -> None:
+        pen = pg.mkPen(HIGHLIGHT_COLOR, width=3, cosmetic=True)
+        self.rings = pg.PlotCurveItem(connect="finite", pen=pen)
+        self.lines = pg.PlotCurveItem(connect="finite", pen=pen)
+        self.points = pg.ScatterPlotItem(
+            pxMode=True, symbol="o", size=16, brush=None, pen=pg.mkPen(HIGHLIGHT_COLOR, width=3)
+        )
+        super().__init__([self.rings, self.lines, self.points])
+        self.set_z(HIGHLIGHT_Z)
+
+    def set_geometries(self, geometries: ArrayLike | None) -> None:
+        paths = to_paths([] if geometries is None else geometries)
+        for item, coords in ((self.rings, paths.rings), (self.lines, paths.lines)):
+            if coords.size:
+                item.setData(coords[:, 0], coords[:, 1])
+            else:
+                item.clear()
+        if paths.points.size:
+            self.points.setData(pos=paths.points)
+        else:
+            self.points.clear()
+
+    def apply_style(self, layer: Any) -> None:  # the overlay has a fixed style
+        pass
