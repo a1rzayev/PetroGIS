@@ -33,6 +33,11 @@ lasio, numpy, pandas, openpyxl. Tests: pytest + pytest-qt. Lint/format: ruff. De
 - Project files are JSON (`.pgis`) and store layer sources, styles, order and CRS. Data stays in the original files
   or a GeoPackage. Paths are stored relative to the project file when possible.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
+- The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
+  `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`
+  in `tests/conftest.py`. The field boundary GeoJSON is written in EPSG:4326 (per RFC 7946), so loading
+  it exercises reprojection. Everything else is EPSG:32639. LAS WELL names and curve mnemonics vary
+  on purpose, and `OFFSET-1` has no matching well header.
 
 ## Performance rules
 

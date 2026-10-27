@@ -4,7 +4,7 @@
 
 - [x] M0 — Scaffold: uv/pyproject, package skeleton, app shell window, logging + error dialogs,
       offscreen screenshot script, architecture/startup tests, CLAUDE.md, ROADMAP.md
-- [ ] M1 — Sample data generator: field boundary (GeoJSON), ~10 wells (CSV/XLSX), synthetic LAS,
+- [x] M1 — Sample data generator: field boundary (GeoJSON), ~10 wells (CSV/XLSX), synthetic LAS,
       anticline structure-top GeoTIFF, all in UTM 39N
 - [ ] M2 — Core + IO: Project, layers, styles, CRS reprojection, NaN-path geometry, vector readers
       (SHP/GeoJSON/GPKG/KML), downsampled raster reads
