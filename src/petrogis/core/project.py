@@ -14,7 +14,8 @@ from typing import Any
 
 from petrogis.core.crs import DEFAULT_PROJECT_CRS, normalize_crs
 from petrogis.core.extent import Extent, union_all
-from petrogis.core.layers import Layer
+from petrogis.core.layers import Layer, WellLayer
+from petrogis.core.logs import WellLog
 
 log = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ class EventKind(StrEnum):
     LAYER_REMOVED = "layer_removed"
     LAYER_MOVED = "layer_moved"
     LAYER_CHANGED = "layer_changed"
-    """A layer property changed. ``field`` is one of "name", "visible" or "style"."""
+    """A layer property changed. ``field`` is one of "name", "visible", "style" or "logs"."""
     CRS_CHANGED = "crs_changed"
     CLEARED = "cleared"
 
@@ -133,6 +134,25 @@ class Project:
         if layer.visible != visible:
             layer.visible = visible
             self._emit(ProjectEvent(EventKind.LAYER_CHANGED, layer_id, field="visible"))
+
+    def attach_logs(self, layer_id: str, logs: dict[str, list[WellLog]]) -> int:
+        """Attach logs (keyed by normalised well name) to a well layer.
+
+        A log from the same source file replaces the earlier copy. Returns the number of logs added.
+        """
+        layer = self.get(layer_id)
+        if not isinstance(layer, WellLayer):
+            raise TypeError(f"Layer {layer.name!r} is not a well layer")
+        added = 0
+        for key, new_logs in logs.items():
+            current = layer.logs.setdefault(key, [])
+            for log_ in new_logs:
+                current[:] = [old for old in current if old.source != log_.source]
+                current.append(log_)
+                added += 1
+        if added:
+            self._emit(ProjectEvent(EventKind.LAYER_CHANGED, layer_id, field="logs"))
+        return added
 
     def set_style(self, layer_id: str, style: Any) -> None:
         layer = self.get(layer_id)

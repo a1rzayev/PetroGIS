@@ -18,6 +18,7 @@ from PySide6.QtCore import QThreadPool
 from PySide6.QtWidgets import QApplication
 
 from petrogis.app import create_app
+from petrogis.core.layers import WellLayer
 from petrogis.ui.main_window import MainWindow
 
 SAMPLE_DIR = Path(__file__).resolve().parents[1] / "sample_data"
@@ -58,11 +59,18 @@ def main() -> int:
 
     app = create_app([])
     window = MainWindow()
+    window.resize(1600, 900)
     window.show()
     app.processEvents()
     if args.demo:
         load_demo(window)
         settle(app, window)
+        # OFFSET_1.las has no matching well; leave it out so no warning dialog blocks the run.
+        las_files = sorted(p for p in (SAMPLE_DIR / "las").glob("*.las") if p.stem != "OFFSET_1")
+        window.import_las(las_files)
+        settle(app, window)
+        wells = next(layer for layer in window.project.layers if isinstance(layer, WellLayer))
+        window.show_well_logs(wells, wells.find("AB-02"))
         window.zoom_to_full_extent()
         settle(app, window)
     else:

@@ -22,9 +22,11 @@ from PySide6.QtWidgets import (
 from petrogis import __version__
 from petrogis.core.crs import CRSError, crs_label, normalize_crs
 from petrogis.core.layers import Layer, RasterLayer, VectorLayer, WellLayer
+from petrogis.core.logs import match_logs
 from petrogis.core.project import Project
 from petrogis.core.styles import VECTOR_PALETTE
 from petrogis.io.errors import MissingCRSError
+from petrogis.io.las_io import LAS_FILE_FILTER, LasBatch, read_las_files
 from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer
 from petrogis.io.vector_io import VECTOR_FILE_FILTER, list_layers, load_vector_layer
 from petrogis.io.wells_io import (
@@ -45,6 +47,7 @@ from petrogis.ui.dialogs.style_vector import edit_vector_style
 from petrogis.ui.dialogs.style_wells import edit_well_style
 from petrogis.ui.errors import show_error, show_warning
 from petrogis.ui.layer_panel import LayerPanel
+from petrogis.ui.log_viewer import LogViewer
 from petrogis.ui.map_controller import MapController
 from petrogis.ui.project_bridge import ProjectBridge
 from petrogis.ui.workers import TaskRunner
@@ -84,6 +87,14 @@ class MainWindow(QMainWindow):
         self.layer_panel.style_requested.connect(self.edit_layer_style)
         self.layer_panel.remove_requested.connect(self.remove_layer)
 
+        self.log_viewer = LogViewer()
+        self.log_dock = QDockWidget("Logs", self)
+        self.log_dock.setObjectName("LogsDock")
+        self.log_dock.setWidget(self.log_viewer)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.log_dock)
+        self.log_dock.hide()
+        self.canvas.clicked.connect(self.on_map_clicked)
+
         self._build_actions()
         self._build_menus()
         self._build_toolbar()
@@ -111,6 +122,9 @@ class MainWindow(QMainWindow):
         )
         self.import_wells_action = self._action(
             "Import &Wells…", self.open_wells_dialog, "Ctrl+Shift+W"
+        )
+        self.import_las_action = self._action(
+            "Import &LAS Logs…", self.open_las_dialog, "Ctrl+Shift+G"
         )
         self.remove_layer_action = self._action(
             "&Remove Layer", lambda: self._with_current(self.remove_layer)
@@ -151,7 +165,12 @@ class MainWindow(QMainWindow):
 
         layers_menu = bar.addMenu("&Layers")
         layers_menu.addActions(
-            [self.add_vector_action, self.add_raster_action, self.import_wells_action]
+            [
+                self.add_vector_action,
+                self.add_raster_action,
+                self.import_wells_action,
+                self.import_las_action,
+            ]
         )
         layers_menu.addSeparator()
         layers_menu.addActions(
@@ -171,6 +190,7 @@ class MainWindow(QMainWindow):
         )
         view_menu.addSeparator()
         view_menu.addAction(self.layer_dock.toggleViewAction())
+        view_menu.addAction(self.log_dock.toggleViewAction())
 
         help_menu = bar.addMenu("&Help")
         help_menu.addAction(self.about_action)
@@ -180,7 +200,12 @@ class MainWindow(QMainWindow):
         toolbar.setObjectName("MapToolbar")
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
         toolbar.addActions(
-            [self.add_vector_action, self.add_raster_action, self.import_wells_action]
+            [
+                self.add_vector_action,
+                self.add_raster_action,
+                self.import_wells_action,
+                self.import_las_action,
+            ]
         )
         toolbar.addSeparator()
         toolbar.addActions([self.pan_action, self.zoom_box_action])
@@ -279,6 +304,75 @@ class MainWindow(QMainWindow):
             show_warning(
                 self, f"Imported {result.layer.name} with warnings", "\n".join(result.warnings)
             )
+
+    # --- logs --------------------------------------------------------------------------------
+    def _target_well_layer(self) -> WellLayer | None:
+        """The selected well layer, otherwise the topmost well layer in the project."""
+        current = self.layer_panel.current_layer_id()
+        if current is not None and isinstance(layer := self.project.get(current), WellLayer):
+            return layer
+        return next((lyr for lyr in self.project.layers if isinstance(lyr, WellLayer)), None)
+
+    def open_las_dialog(self) -> None:
+        if self._target_well_layer() is None:
+            show_warning(self, "Import LAS Logs", "Import well headers first, then their logs.")
+            return
+        paths, _ = QFileDialog.getOpenFileNames(self, "Import LAS Logs", "", LAS_FILE_FILTER)
+        if paths:
+            self.import_las(paths)
+
+    def import_las(self, paths: list[str | Path]) -> None:
+        """Read LAS files in the background and attach them to the target well layer."""
+        target = self._target_well_layer()
+        if target is None:
+            show_warning(self, "Import LAS Logs", "Import well headers first, then their logs.")
+            return
+        layer_id = target.id
+        self.statusBar().showMessage(f"Reading {len(paths)} LAS file(s)…")
+        self.tasks.submit(
+            read_las_files,
+            list(paths),
+            on_result=lambda batch: self._on_las_read(layer_id, batch),
+            on_error=lambda exc: self._on_load_failed(Path(paths[0]), exc),
+        )
+
+    def _on_las_read(self, layer_id: str, batch: LasBatch) -> None:
+        layer = self.project.get(layer_id)
+        assert isinstance(layer, WellLayer)
+        match = match_logs(batch.logs, layer)
+        added = self.project.attach_logs(layer_id, match.matched)
+        summary = f"Attached {added} LAS file(s) to {len(match.matched)} well(s) in {layer.name}"
+        self.statusBar().showMessage(summary, 5000)
+        problems = [
+            f"No matching well for {Path(log.source).name} (WELL = {log.well_name!r})"
+            for log in match.unmatched
+        ] + [f"{name}: {reason}" for name, reason in batch.failures]
+        if problems:
+            show_warning(self, "LAS import", summary + ".\n\n" + "\n".join(problems))
+
+    def on_map_clicked(self, x: float, y: float) -> None:
+        """Open the log viewer for the nearest well under the cursor (topmost well layer first)."""
+        tolerance = 8.0 * self.canvas.map_units_per_pixel()
+        for layer in self.project.layers:
+            if not (isinstance(layer, WellLayer) and layer.visible):
+                continue
+            hits = layer.features_at(x, y, tolerance)
+            if not hits:
+                continue
+            xy = layer.xy()[hits]
+            nearest = hits[int(((xy[:, 0] - x) ** 2 + (xy[:, 1] - y) ** 2).argmin())]
+            self.show_well_logs(layer, nearest)
+            return
+
+    def show_well_logs(self, layer: WellLayer, position: int) -> None:
+        row = layer.gdf.iloc[position]
+        logs = layer.logs_for(position)
+        kb = float(row["kb"]) if row["kb"] == row["kb"] else None  # NaN check
+        uwi = "" if row["uwi"] is None or row["uwi"] != row["uwi"] else str(row["uwi"])
+        self.log_viewer.show_well(str(row["name"]), logs, uwi=uwi, kb=kb)
+        self.log_dock.show()
+        if not logs:
+            self.statusBar().showMessage(f"No logs loaded for {row['name']}", 4000)
 
     def add_vector_file(self, path: str | Path) -> None:
         """Load a vector file, asking which layers to load when it has more than one."""

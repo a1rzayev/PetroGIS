@@ -61,6 +61,15 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
   Each label tries right, left, above and below, avoids other labels and well symbols, and
   labels are hidden entirely above `MAX_VISIBLE_ANCHORS`. `WellLabelItem` paints all labels in
   one `paint()` call.
+- Logs: `core/mnemonics.py` holds the curve alias table (family to mnemonics, in priority order).
+  Add vendor mnemonics there and nowhere else. `WellLog.curve_for(family)` resolves through it.
+  LAS files attach to a `WellLayer` via `Project.attach_logs` (keyed by `name_key`, which emits
+  LAYER_CHANGED "logs"). `match_logs` matches on the LAS WELL name, then UWI, then file name.
+  Unmatched files and read failures are reported to the user. Depth is MD in the file's unit.
+  Phase 1 assumes vertical wells.
+- Log viewer: one pyqtgraph track per family, with Y linked and inverted. Value scales are fixed
+  (GR 0-150, deep resistivity 0.2-2000 log, NPHI 0.45 to -0.15 with RHOB 1.95-2.95 on a second
+  ViewBox). Disable auto SI prefixes on track axes.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

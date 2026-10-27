@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     import geopandas as gpd
 
     from petrogis.core.geometry import GeometryPaths
+    from petrogis.core.logs import WellLog
 
 
 class LayerKind(StrEnum):
@@ -115,6 +116,8 @@ class WellLayer(FeatureLayer):
     import_options: dict[str, Any] = field(default_factory=dict)
     """How the source was read (column mapping, source CRS, sheet), so it can be re-read later."""
     style: WellStyle = field(default_factory=WellStyle)
+    logs: dict[str, list[WellLog]] = field(default_factory=dict)
+    """Logs attached to each well, keyed by ``name_key``."""
     _index: dict[str, int] | None = field(default=None, init=False, repr=False)
 
     @property
@@ -138,6 +141,16 @@ class WellLayer(FeatureLayer):
                 index.setdefault(str(key), pos)
             self._index = index
         return self._index.get(normalize_well_name(name))
+
+    def logs_for(self, position: int) -> list[WellLog]:
+        if self.gdf is None:
+            return []
+        return self.logs.get(str(self.gdf["name_key"].iloc[position]), [])
+
+    @property
+    def log_sources(self) -> list[str]:
+        """Paths of every attached LAS file, in attachment order."""
+        return [log.source for logs in self.logs.values() for log in logs]
 
     def xy(self) -> NDArray[np.float64]:
         if self.gdf is None or self.gdf.empty:
