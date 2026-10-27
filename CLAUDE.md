@@ -51,6 +51,16 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
 - Map canvas: each vector layer is drawn with 3 pyqtgraph items (polygon rings, lines, points),
   whatever its feature count. Rasters use one ImageItem fed by `read_raster_view`. In-layer z order
   is rings < lines < points.
+- Wells: `core.wells.normalize_well_name` is the single matching key ("AB-01", "ab_1" and "AB 1"
+  all give "AB1"). `WellLayer` stores it as `name_key` and looks wells up with `find()`. Header
+  import is two-step (`read_well_table`, then `build_well_layer`), so the UI can show the
+  column-mapping dialog only when auto-detection is incomplete. Without the dialog, the source
+  CRS is the project CRS, or EPSG:4326 when headers or values look like lon/lat. Rows with bad
+  data and duplicate names become user-visible warnings, never silent drops.
+- Labels: `render/labels.place_labels` (Qt-free) lays out labels greedily in screen space.
+  Each label tries right, left, above and below, avoids other labels and well symbols, and
+  labels are hidden entirely above `MAX_VISIBLE_ANCHORS`. `WellLabelItem` paints all labels in
+  one `paint()` call.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

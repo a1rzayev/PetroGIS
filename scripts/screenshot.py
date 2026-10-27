@@ -46,6 +46,7 @@ def load_demo(window: MainWindow) -> None:
         generate(SAMPLE_DIR)
     window.load_raster(SAMPLE_DIR / "structure_top.tif")
     window.load_vector(SAMPLE_DIR / "field_boundary.geojson")
+    window.import_wells(SAMPLE_DIR / "wells.csv")
 
 
 def main() -> int:

@@ -24,6 +24,12 @@ def show_error(
     box.exec()
 
 
+def show_warning(parent: QWidget | None, title: str, message: str) -> None:
+    """Log ``message`` as a warning and show it in a modal dialog."""
+    log.warning("%s: %s", title, message)
+    QMessageBox.warning(parent, title, message)
+
+
 def install_excepthook() -> None:
     """Route uncaught exceptions to the log and an error dialog instead of a silent crash."""
 

@@ -9,10 +9,13 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+import numpy as np
+from numpy.typing import NDArray
 
 from petrogis.core.extent import Extent
-from petrogis.core.styles import RasterStyle, VectorStyle
+from petrogis.core.styles import RasterStyle, VectorStyle, WellStyle
 
 if TYPE_CHECKING:
     import geopandas as gpd
@@ -23,6 +26,7 @@ if TYPE_CHECKING:
 class LayerKind(StrEnum):
     VECTOR = "vector"
     RASTER = "raster"
+    WELLS = "wells"
 
 
 def new_layer_id() -> str:
@@ -47,17 +51,11 @@ class Layer:
 
 
 @dataclass(eq=False)
-class VectorLayer(Layer):
+class FeatureLayer(Layer):
+    """Base class for layers backed by a GeoDataFrame in the project CRS."""
+
     gdf: gpd.GeoDataFrame | None = None
     """Features already reprojected to the project CRS."""
-    source_layer: str | None = None
-    """Layer name inside multi-layer sources (GeoPackage, KML)."""
-    style: VectorStyle = field(default_factory=VectorStyle)
-    _paths: GeometryPaths | None = field(default=None, init=False, repr=False)
-
-    @property
-    def kind(self) -> LayerKind:
-        return LayerKind.VECTOR
 
     @property
     def extent(self) -> Extent | None:
@@ -69,15 +67,6 @@ class VectorLayer(Layer):
     @property
     def feature_count(self) -> int:
         return 0 if self.gdf is None else len(self.gdf)
-
-    @property
-    def paths(self) -> GeometryPaths:
-        """NaN-separated render paths, built once on first access."""
-        if self._paths is None:
-            from petrogis.core.geometry import to_paths
-
-            self._paths = to_paths(self.gdf.geometry.values if self.gdf is not None else [])
-        return self._paths
 
     def features_at(self, x: float, y: float, tolerance: float) -> list[int]:
         """Positional indices of features within ``tolerance`` map units of (x, y).
@@ -91,6 +80,71 @@ class VectorLayer(Layer):
         probe = shapely.Point(x, y).buffer(tolerance)
         hits = self.gdf.sindex.query(probe, predicate="intersects")
         return sorted(int(i) for i in hits)
+
+
+@dataclass(eq=False)
+class VectorLayer(FeatureLayer):
+    source_layer: str | None = None
+    """Layer name inside multi-layer sources (GeoPackage, KML)."""
+    style: VectorStyle = field(default_factory=VectorStyle)
+    _paths: GeometryPaths | None = field(default=None, init=False, repr=False)
+
+    @property
+    def kind(self) -> LayerKind:
+        return LayerKind.VECTOR
+
+    @property
+    def paths(self) -> GeometryPaths:
+        """NaN-separated render paths, built once on first access."""
+        if self._paths is None:
+            from petrogis.core.geometry import to_paths
+
+            self._paths = to_paths(self.gdf.geometry.values if self.gdf is not None else [])
+        return self._paths
+
+
+@dataclass(eq=False)
+class WellLayer(FeatureLayer):
+    """Well surface locations, one point per well, with columns ``name``, ``uwi``, ``kb`` and
+    ``td``, a normalised-name column ``name_key``, and any extra source columns.
+
+    Planned extensions (Phase 2): trajectories (deviation surveys) and formation tops keyed by
+    ``name_key``.
+    """
+
+    import_options: dict[str, Any] = field(default_factory=dict)
+    """How the source was read (column mapping, source CRS, sheet), so it can be re-read later."""
+    style: WellStyle = field(default_factory=WellStyle)
+    _index: dict[str, int] | None = field(default=None, init=False, repr=False)
+
+    @property
+    def kind(self) -> LayerKind:
+        return LayerKind.WELLS
+
+    @property
+    def names(self) -> list[str]:
+        return [] if self.gdf is None else [str(n) for n in self.gdf["name"]]
+
+    def find(self, name: str) -> int | None:
+        """Positional index of the well whose normalised name matches ``name``."""
+        from petrogis.core.wells import normalize_well_name
+
+        if self.gdf is None:
+            return None
+        if self._index is None:
+            # The first occurrence wins for duplicate names. The importer warns about them.
+            index: dict[str, int] = {}
+            for pos, key in enumerate(self.gdf["name_key"]):
+                index.setdefault(str(key), pos)
+            self._index = index
+        return self._index.get(normalize_well_name(name))
+
+    def xy(self) -> NDArray[np.float64]:
+        if self.gdf is None or self.gdf.empty:
+            return np.empty((0, 2))
+        import shapely
+
+        return shapely.get_coordinates(self.gdf.geometry.values)
 
 
 @dataclass(frozen=True)

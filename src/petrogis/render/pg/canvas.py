@@ -9,10 +9,11 @@ from PySide6.QtCore import QPointF, Qt, QTimer, Signal
 from PySide6.QtWidgets import QWidget
 
 from petrogis.core.extent import Extent
-from petrogis.core.layers import Layer, RasterLayer, VectorLayer
+from petrogis.core.layers import Layer, RasterLayer, VectorLayer, WellLayer
 from petrogis.io.raster_io import RasterView
 from petrogis.render.base import MouseMode
 from petrogis.render.pg.items import LayerGraphics, RasterGraphics, VectorGraphics
+from petrogis.render.pg.well_items import WellGraphics
 
 VIEW_CHANGE_DEBOUNCE_MS = 120
 
@@ -70,6 +71,8 @@ class PgMapCanvas(pg.PlotWidget):
             graphics: LayerGraphics = VectorGraphics(layer)
         elif isinstance(layer, RasterLayer):
             graphics = RasterGraphics(layer)
+        elif isinstance(layer, WellLayer):
+            graphics = WellGraphics(layer)
         else:
             raise TypeError(f"Cannot render layer type {type(layer).__name__}")
         for item in graphics.items:
@@ -93,11 +96,8 @@ class PgMapCanvas(pg.PlotWidget):
         return self._layers[layer_id]
 
     def update_layer_style(self, layer: Layer) -> None:
-        graphics = self._layers[layer.id]
-        if (isinstance(graphics, VectorGraphics) and isinstance(layer, VectorLayer)) or (
-            isinstance(graphics, RasterGraphics) and isinstance(layer, RasterLayer)
-        ):
-            graphics.apply_style(layer)
+        # Each graphics class was built for its layer type in add_layer.
+        self._layers[layer.id].apply_style(layer)
 
     def set_layer_visible(self, layer_id: str, visible: bool) -> None:
         self._layers[layer_id].set_visible(visible)

@@ -21,18 +21,29 @@ from PySide6.QtWidgets import (
 
 from petrogis import __version__
 from petrogis.core.crs import CRSError, crs_label, normalize_crs
-from petrogis.core.layers import Layer, RasterLayer, VectorLayer
+from petrogis.core.layers import Layer, RasterLayer, VectorLayer, WellLayer
 from petrogis.core.project import Project
 from petrogis.core.styles import VECTOR_PALETTE
 from petrogis.io.errors import MissingCRSError
 from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer
 from petrogis.io.vector_io import VECTOR_FILE_FILTER, list_layers, load_vector_layer
+from petrogis.io.wells_io import (
+    WELL_TABLE_FILE_FILTER,
+    ColumnMapping,
+    WellImportResult,
+    WellTable,
+    build_well_layer,
+    list_sheets,
+    read_well_table,
+)
 from petrogis.render.base import MouseMode
 from petrogis.render.pg.canvas import PgMapCanvas
+from petrogis.ui.dialogs.column_mapping import ask_column_mapping
 from petrogis.ui.dialogs.layer_picker import pick_layers
 from petrogis.ui.dialogs.style_raster import edit_raster_style
 from petrogis.ui.dialogs.style_vector import edit_vector_style
-from petrogis.ui.errors import show_error
+from petrogis.ui.dialogs.style_wells import edit_well_style
+from petrogis.ui.errors import show_error, show_warning
 from petrogis.ui.layer_panel import LayerPanel
 from petrogis.ui.map_controller import MapController
 from petrogis.ui.project_bridge import ProjectBridge
@@ -98,6 +109,9 @@ class MainWindow(QMainWindow):
         self.add_raster_action = self._action(
             "Add &Raster Layer…", self.open_raster_dialog, "Ctrl+Shift+R"
         )
+        self.import_wells_action = self._action(
+            "Import &Wells…", self.open_wells_dialog, "Ctrl+Shift+W"
+        )
         self.remove_layer_action = self._action(
             "&Remove Layer", lambda: self._with_current(self.remove_layer)
         )
@@ -136,7 +150,9 @@ class MainWindow(QMainWindow):
         file_menu.addAction(self.exit_action)
 
         layers_menu = bar.addMenu("&Layers")
-        layers_menu.addActions([self.add_vector_action, self.add_raster_action])
+        layers_menu.addActions(
+            [self.add_vector_action, self.add_raster_action, self.import_wells_action]
+        )
         layers_menu.addSeparator()
         layers_menu.addActions(
             [self.style_action, self.zoom_layer_action, self.remove_layer_action]
@@ -163,7 +179,9 @@ class MainWindow(QMainWindow):
         toolbar = QToolBar("Map", self)
         toolbar.setObjectName("MapToolbar")
         toolbar.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        toolbar.addActions([self.add_vector_action, self.add_raster_action])
+        toolbar.addActions(
+            [self.add_vector_action, self.add_raster_action, self.import_wells_action]
+        )
         toolbar.addSeparator()
         toolbar.addActions([self.pan_action, self.zoom_box_action])
         toolbar.addSeparator()
@@ -203,6 +221,64 @@ class MainWindow(QMainWindow):
         paths, _ = QFileDialog.getOpenFileNames(self, "Add Raster Layer", "", RASTER_FILE_FILTER)
         for path in paths:
             self.load_raster(path)
+
+    def open_wells_dialog(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Import Well Headers", "", WELL_TABLE_FILE_FILTER
+        )
+        for path in paths:
+            self.import_wells(path)
+
+    def import_wells(self, path: str | Path, sheet: str | None = None) -> None:
+        """Read a well-header table, confirm the column mapping if needed, then build the layer."""
+        path = Path(path)
+        if sheet is None and path.suffix.lower() in {".xlsx", ".xlsm"}:
+            try:
+                sheets = list_sheets(path)
+            except Exception as exc:  # noqa: BLE001 - shown to the user
+                show_error(self, "Cannot import wells", str(exc), exc)
+                return
+            if len(sheets) > 1:
+                sheet, ok = QInputDialog.getItem(
+                    self, "Select Sheet", f"{path.name} has several sheets:", sheets, 0, False
+                )
+                if not ok:
+                    return
+        self.statusBar().showMessage(f"Reading {path.name}…")
+        self.tasks.submit(
+            read_well_table,
+            path,
+            sheet,
+            on_result=self._on_well_table,
+            on_error=lambda exc: self._on_load_failed(path, exc),
+        )
+
+    def _on_well_table(self, table: WellTable) -> None:
+        self.statusBar().clearMessage()
+        if table.mapping.is_complete:
+            mapping: ColumnMapping = table.mapping
+            source_crs = table.suggested_crs or self.project.crs
+        else:
+            answer = ask_column_mapping(table, self.project.crs, self)
+            if answer is None:
+                return
+            mapping, source_crs = answer
+        self.tasks.submit(
+            build_well_layer,
+            table,
+            mapping,
+            source_crs,
+            self.project.crs,
+            on_result=self._on_wells_built,
+            on_error=lambda exc: self._on_load_failed(table.path, exc),
+        )
+
+    def _on_wells_built(self, result: WellImportResult) -> None:
+        self._on_layer_loaded(result.layer)
+        if result.warnings:
+            show_warning(
+                self, f"Imported {result.layer.name} with warnings", "\n".join(result.warnings)
+            )
 
     def add_vector_file(self, path: str | Path) -> None:
         """Load a vector file, asking which layers to load when it has more than one."""
@@ -298,6 +374,8 @@ class MainWindow(QMainWindow):
             style = edit_vector_style(layer.style, layer.name, self)
         elif isinstance(layer, RasterLayer) and layer.info is not None:
             style = edit_raster_style(layer.style, layer.info, layer.name, self)
+        elif isinstance(layer, WellLayer):
+            style = edit_well_style(layer.style, layer.name, self)
         else:
             return
         if style is not None:

@@ -10,7 +10,7 @@
       (SHP/GeoJSON/GPKG/KML), downsampled raster reads
 - [x] M3 — Map canvas: pan, wheel/box zoom, zoom to layer/extent, cursor coords; layer panel
       (visibility, reorder, rename, remove); vector + raster rendering and style dialogs; background loading
-- [ ] M4 — Wells: CSV/Excel header import, column auto-detection, mapping dialog, symbols + LOD labels
+- [x] M4 — Wells: CSV/Excel header import, column auto-detection, mapping dialog, symbols + LOD labels
 - [ ] M5 — LAS logs: batch import, name matching, mnemonic aliases, log viewer dock
       (GR | resistivity log-scale | NPHI+RHOB, shared inverted depth)
 - [ ] M6 — Identify tool + attribute table dock

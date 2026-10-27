@@ -90,11 +90,10 @@ class LayerPanel(QListWidget):
             | Qt.ItemFlag.ItemIsDragEnabled
         )
         item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
-        icon = (
-            QStyle.StandardPixmap.SP_FileDialogContentsView
-            if layer.kind is LayerKind.RASTER
-            else QStyle.StandardPixmap.SP_FileIcon
-        )
+        icon = {
+            LayerKind.RASTER: QStyle.StandardPixmap.SP_FileDialogContentsView,
+            LayerKind.WELLS: QStyle.StandardPixmap.SP_FileDialogDetailedView,
+        }.get(layer.kind, QStyle.StandardPixmap.SP_FileIcon)
         item.setIcon(self.style().standardIcon(icon))
         item.setToolTip(f"{layer.kind.value}: {layer.source}")
         return item

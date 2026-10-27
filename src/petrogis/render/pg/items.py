@@ -8,6 +8,7 @@ image for rasters.
 from __future__ import annotations
 
 from functools import cache
+from typing import Any
 
 import numpy as np
 import pyqtgraph as pg
@@ -38,6 +39,9 @@ class LayerGraphics:
     def set_opacity(self, opacity: float) -> None:
         for item in self.items:
             item.setOpacity(opacity)
+
+    def apply_style(self, layer: Any) -> None:
+        raise NotImplementedError
 
 
 class VectorGraphics(LayerGraphics):

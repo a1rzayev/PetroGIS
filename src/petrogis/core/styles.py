@@ -46,6 +46,22 @@ class VectorStyle(_Serializable):
 
 
 @dataclass
+class WellStyle(_Serializable):
+    color: str = "#000000"
+    symbol_size: float = 9.0
+    show_labels: bool = True
+    label_size: float = 9.0
+    """Label font size in points."""
+    label_color: str = "#000000"
+
+    def __post_init__(self) -> None:
+        _check_color(self.color)
+        _check_color(self.label_color)
+        if self.symbol_size <= 0 or self.label_size <= 0:
+            raise ValueError("Sizes must be positive")
+
+
+@dataclass
 class RasterStyle(_Serializable):
     colormap: str = "viridis"
     vmin: float | None = None
