@@ -97,5 +97,8 @@ describes how the planned subsurface features plug in.
 
 ## Status
 
-Phase 1 is complete. Phase 2 will add deviation surveys, formation tops, gridding and contours,
-volumetrics with Monte Carlo, cross-sections, 3D, SEG-Y, a plugin API and installers.
+Phase 1 is complete. Phase 2 brings the everyday QGIS feature set to PetroGIS without QGIS's known
+classes of bugs and vulnerabilities: CRS tools, safe expressions, rich styling, editing,
+processing, basemaps and print layouts. It is interleaved with the subsurface work: deviation
+surveys, formation tops, gridding and contours, volumetrics with Monte Carlo, and cross-sections.
+See [docs/phase2-plan.md](docs/phase2-plan.md).

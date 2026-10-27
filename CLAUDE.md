@@ -1,8 +1,12 @@
 # PetroGIS
 
 Cross-platform desktop GIS for petroleum engineering and reservoir geology. It focuses on wells,
-logs and subsurface data. It is not a QGIS clone. Phase 1 is complete (see ROADMAP.md). Phase 2
-design notes are in `docs/phase2.md`.
+logs and subsurface data. It is not a QGIS clone. Phase 1 is complete (see ROADMAP.md).
+
+Phase 2 follows `docs/phase2-plan.md`: core QGIS parity, interleaved with the subsurface designs in
+`docs/phase2.md`. Every Phase 2 milestone must pass that plan's quality gates and security baseline.
+In particular, project and style files never contain executable code, credentials live only in
+the OS keychain, and data-derived text is never rendered as markup.
 
 ## Commands
 

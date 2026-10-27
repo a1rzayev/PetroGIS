@@ -1,7 +1,8 @@
-# Phase 2 design notes
+# Phase 2 design notes (subsurface features)
 
-How each planned feature fits into the Phase 1 architecture. These notes are design intent, not
-commitments. Each feature still gets its own plan before implementation. The rules in
+How each planned subsurface feature fits into the Phase 1 architecture. Scheduling, scope and the
+security and quality gates are in [phase2-plan.md](phase2-plan.md). These notes are design intent,
+not commitments. Each feature still gets its own plan before implementation. The rules in
 [CLAUDE.md](../CLAUDE.md) apply throughout:
 
 - Algorithms are pure functions in `core/` or `analysis/`, with no Qt.
