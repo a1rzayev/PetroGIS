@@ -89,6 +89,7 @@ def test_errors(tmp_path):
         read_raster_info(nocrs, UTM)
 
 
+@pytest.mark.perf
 def test_large_raster_view_reads_are_fast(tmp_path):
     """A 6000x6000 raster with overviews: a screen-sized full view must be quick."""
     path = tmp_path / "big.tif"

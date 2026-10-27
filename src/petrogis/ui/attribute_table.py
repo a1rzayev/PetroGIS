@@ -70,7 +70,8 @@ class FeatureTableModel(QAbstractTableModel):
         if role != Qt.ItemDataRole.DisplayRole or not index.isValid() or self.layer is None:
             return None
         gdf = self.layer.gdf
-        assert gdf is not None
+        if gdf is None:
+            return None
         column = gdf.columns.get_loc(self.columns[index.column()])
         return format_value(gdf.iat[int(self.rows[index.row()]), column])
 

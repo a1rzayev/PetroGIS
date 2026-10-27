@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+import pytest
 
 from petrogis.render.labels import MAX_VISIBLE_ANCHORS, place_labels
 
@@ -47,6 +48,7 @@ def test_too_many_visible_hides_all():
     assert place_labels(px, py, np.full(n, 30.0), 12.0, VIEW).size == 0
 
 
+@pytest.mark.perf
 def test_dense_field_is_fast():
     rng = np.random.default_rng(0)
     n = MAX_VISIBLE_ANCHORS

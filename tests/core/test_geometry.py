@@ -1,6 +1,7 @@
 import time
 
 import numpy as np
+import pytest
 import shapely
 from shapely import (
     GeometryCollection,
@@ -74,6 +75,7 @@ def test_nan_separated_single_part_has_no_separator():
     assert arr.shape == (3, 2) and _nan_rows(arr) == 0
 
 
+@pytest.mark.perf
 def test_large_input_is_fast():
     rng = np.random.default_rng(0)
     coords = rng.uniform(0, 1e5, size=(100_000, 4, 2))

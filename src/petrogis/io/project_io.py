@@ -281,7 +281,7 @@ def _load_layer(entry: dict[str, Any], base: Path, crs: str, warnings: list[str]
 
 
 def _read_view(view: Any) -> Extent | None:
-    """The saved map view, or ``None`` when missing or malformed (a bad view is not worth a warning)."""
+    """The saved map view, or ``None`` when missing or malformed (not worth a warning)."""
     if not (isinstance(view, list) and len(view) == 4):
         return None
     if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in view):

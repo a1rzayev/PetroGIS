@@ -489,7 +489,9 @@ class MainWindow(QMainWindow):
         except KeyError:
             self.statusBar().showMessage("LAS import discarded: the well layer was removed", 5000)
             return
-        assert isinstance(layer, WellLayer)
+        if not isinstance(layer, WellLayer):
+            log.error("LAS import target %s is not a well layer", layer_id)
+            return
         match = match_logs(batch.logs, layer)
         added = self.project.attach_logs(layer_id, match.matched)
         summary = f"Attached {added} LAS file(s) to {len(match.matched)} well(s) in {layer.name}"

@@ -101,4 +101,4 @@ Phase 1 is complete. Phase 2 brings the everyday QGIS feature set to PetroGIS wi
 classes of bugs and vulnerabilities: CRS tools, safe expressions, rich styling, editing,
 processing, basemaps and print layouts. It is interleaved with the subsurface work: deviation
 surveys, formation tops, gridding and contours, volumetrics with Monte Carlo, and cross-sections.
-See [docs/phase2-plan.md](docs/phase2-plan.md).
+The staged plan to MVP and production is in [docs/product-plan.md](docs/product-plan.md).

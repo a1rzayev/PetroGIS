@@ -44,15 +44,33 @@ target-version = "py311"
 src = ["src", "tests", "scripts"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ANN", "BLE", "PERF", "NPY"]
+# S = flake8-bandit security rules (security baseline, docs/phase2-plan.md).
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ANN", "BLE", "PERF", "NPY", "S"]
 ignore = ["ANN401"]
 # En dashes are intentional in user-facing strings (e.g. "Style – Layer", "2–98%").
 allowed-confusables = ["–"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["ANN"]
+# Tests use plain asserts (S101) and run the interpreter itself in a subprocess (S603).
+"tests/**" = ["ANN", "S101", "S603"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 qt_api = "pyside6"
 addopts = "-ra"
+markers = [
+    "perf: timing test with a budget; run without coverage instrumentation (CI runs them separately)",
+]
+
+[tool.pyright]
+# Strict typing on the Qt-free layers (quality gates, docs/phase2-plan.md). Runs in CI.
+include = ["src/petrogis/core", "src/petrogis/io"]
+strict = ["src/petrogis/core", "src/petrogis/io"]
+pythonVersion = "3.11"
+venvPath = "."
+venv = ".venv"
+# pandas/geopandas/rasterio are largely untyped; these checks would only report library noise.
+reportMissingTypeStubs = false
+reportUnknownMemberType = false
+reportUnknownArgumentType = false
+reportUnknownVariableType = false

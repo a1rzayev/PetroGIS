@@ -1,6 +1,6 @@
 # Phase 2 plan: QGIS-grade core, built safely
 
-**Scope decision (2026-10-27): core parity.** PetroGIS will offer the QGIS features that petroleum
+**Scope decision (2026-10-27): core parity. Stage order: see [product-plan.md](product-plan.md).** PetroGIS will offer the QGIS features that petroleum
 engineers and geologists use every day, built without QGIS's known classes of bugs and
 vulnerabilities, and interleaved with the subsurface features. It stays domain-focused, not a QGIS
 clone. Everything in [Out of scope](#out-of-scope) stays out unless this document is changed.
@@ -68,26 +68,43 @@ A milestone is done only when all of these hold:
 
 ## Execution order
 
-The subsurface work is interleaved: trajectories and tops come early because they need only the
-layer registry and styling, while gridding and volumetrics wait for the processing framework, so
-that they become ordinary algorithms.
+The order follows the stages in [product-plan.md](product-plan.md) (approved 2026-10-27), which
+replace the earlier sequence. Several milestones are split: the "lite" part ships in the MVP and
+the rest in Beta. The milestone sections below describe each milestone in full; the split is
+recorded here.
 
-| Order | Milestone | Size |
-|---|---|---|
-| 1 | P2.0 Security and quality foundation | M |
-| 2 | P2.1 Layer registry, CRS and data import robustness | M |
-| 3 | P2.2 Expressions and styling | L |
-| 4 | P2.6a Wells in depth: trajectories and tops | L |
-| 5 | P2.3 Navigation and selection | S |
-| 6 | P2.4 Editing and writing data | L |
-| 7 | P2.5 Processing framework | L |
-| 8 | P2.6b Subsurface analysis: gridding, contours, volumetrics, cross-sections | XL |
-| 9 | P2.7 Basemaps and OGC services | M |
-| 10 | P2.8 Print and export layouts | M |
+| Order | Stage | Milestone | Size |
+|---|---|---|---|
+| 1 | Foundation | P2.0 Security and quality foundation | M |
+| 2 | MVP | P2.1 Layer registry, CRS and data import robustness | M |
+| 3 | MVP | P2.2 lite: expression engine, categorized and graduated styles, polygon fill, labels for any layer, legend, well status symbols | M |
+| 4 | MVP | P2.6a Wells in depth: trajectories and tops | L |
+| 5 | MVP | Correlation panel (new, see product-plan.md) | L |
+| 6 | MVP | P2.5 lite: registry, background runs, history, the algorithms the MVP workflow needs | M |
+| 7 | MVP | P2.6b Subsurface analysis: gridding, contours, volumetrics, cross-sections | XL |
+| 8 | MVP | P2.4 lite: GeoPackage layers, digitizing with snapping, undo/redo | M |
+| 9 | MVP | P2.7 lite: XYZ basemaps | S |
+| 10 | MVP | P2.8 lite: single-map figure export | S |
+| 11 | MVP | Packaging and user docs (new, see product-plan.md) | M |
+| 12 | Beta | P2.2 rest: rule-based styles, hillshade, `.pgstyle` | M |
+| 13 | Beta | P2.3 Navigation and selection | S |
+| 14 | Beta | P2.4 rest: field calculator, joins, Save As / export | M |
+| 15 | Beta | P2.5 rest: full algorithm library, batch, raster calculator | L |
+| 16 | Beta | P2.7 rest: WMTS/WMS, WFS, keychain credentials | M |
+| 17 | Beta | P2.8 rest: print layout editor | M |
+
+Beta also adds petrophysics quick-look, production data, a well database, the georeferencer and
+localization. Production 1.0 and later stages are defined in product-plan.md.
+
+**Tooling note (P2.0):** pyright strict and pip-audit run in CI only, not in the local dev
+group, because their download stalls locally.
 
 ## Milestones
 
 ### P2.0 Security and quality foundation
+
+**Status:** all work done. A first CI run on GitHub, and fixing pyright's strict findings before
+the `types` job becomes blocking, are still open. See ROADMAP.md.
 
 - `SECURITY.md`: threat model, supported versions, how to report a vulnerability.
 - Fix the log viewer header, which renders the LAS `WELL` name and file name as unescaped rich text.

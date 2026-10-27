@@ -114,6 +114,7 @@ def test_errors(tmp_path):
     assert len(explicit.layer.gdf) == 1
 
 
+@pytest.mark.perf
 def test_large_table_is_fast(tmp_path):
     n = 100_000
     rng = np.random.default_rng(0)
@@ -131,3 +132,11 @@ def test_large_table_is_fast(tmp_path):
     elapsed = time.perf_counter() - start
     assert len(result.layer.gdf) == n
     assert elapsed < 3.0, f"100k well import took {elapsed:.2f}s"
+
+
+def test_ragged_rows_are_reported_not_misread(tmp_path):
+    path = tmp_path / "ragged.csv"
+    path.write_text("Well,X,Y\nA-1,405000,4475000,extra,cells\nA-2,405100,4475100\n")
+    result = load_well_layer(path, UTM)
+    assert result.layer.gdf["name"].tolist() == ["A-1", "A-2"]
+    assert any("more cells than the header" in w for w in result.warnings)

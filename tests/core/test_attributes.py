@@ -94,6 +94,7 @@ def test_identify_orders_layers_and_features():
     assert identify(project, 500, 500, tolerance=3) == []
 
 
+@pytest.mark.perf
 def test_filter_and_sort_large_table_fast():
     n = 100_000
     df = pd.DataFrame(

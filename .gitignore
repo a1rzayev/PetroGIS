@@ -14,3 +14,6 @@ sample_data/*
 
 # screenshots from scripts/screenshot.py
 screenshots/
+
+# CI dependency-audit scratch file
+requirements-audit.txt

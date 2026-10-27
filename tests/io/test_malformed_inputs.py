@@ -5,6 +5,7 @@ input, a reader either returns a result or raises ``DataReadError`` with a user-
 Any other exception is a bug.
 """
 
+import contextlib
 import json
 import string
 import tempfile
@@ -20,14 +21,13 @@ from petrogis.io.project_io import load_project
 from petrogis.io.wells_io import load_well_layer, read_well_table
 
 UTM = "EPSG:32639"
-SETTINGS = settings(
-    max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-)
+SETTINGS = settings(max_examples=150, deadline=None, suppress_health_check=[HealthCheck.too_slow])
 
 json_values = st.recursive(
     st.none() | st.booleans() | st.integers() | st.floats(allow_nan=True) | st.text(max_size=20),
-    lambda children: st.lists(children, max_size=4)
-    | st.dictionaries(st.text(max_size=10), children, max_size=4),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=10), children, max_size=4)
+    ),
     max_leaves=20,
 )
 layer_keys = st.sampled_from(
@@ -76,10 +76,8 @@ def test_las_reader_fails_cleanly_on_structured_garbage(lines):
 @given(st.binary(max_size=2000))
 def test_las_reader_fails_cleanly_on_random_bytes(data):
     path = _write(".las", data)
-    try:
+    with contextlib.suppress(DataReadError):
         read_las(path)
-    except DataReadError:
-        pass
 
 
 # --- well headers ----------------------------------------------------------------------------
@@ -96,7 +94,11 @@ headers = st.lists(
 
 
 @SETTINGS
-@given(headers, st.lists(st.lists(csv_cells, max_size=7), max_size=8), st.sampled_from([",", ";", "\t"]))
+@given(
+    headers,
+    st.lists(st.lists(csv_cells, max_size=7), max_size=8),
+    st.sampled_from([",", ";", "\t"]),
+)
 def test_well_import_fails_cleanly(header, rows, sep):
     text = "\n".join([sep.join(header), *(sep.join(row) for row in rows)])
     path = _write(".csv", text)
@@ -113,10 +115,8 @@ def test_well_import_fails_cleanly(header, rows, sep):
 @given(json_values)
 def test_project_loader_fails_cleanly_on_any_json(document):
     path = _write(".pgis", json.dumps(document))
-    try:
+    with contextlib.suppress(DataReadError):
         load_project(path)
-    except DataReadError:
-        pass
 
 
 @SETTINGS
@@ -143,7 +143,5 @@ def test_project_loader_skips_bad_layers_with_warnings(top, layers):
 @given(st.dictionaries(st.text(max_size=12), json_values, max_size=6))
 def test_styles_reject_bad_values_with_value_error(data):
     for cls in (VectorStyle, RasterStyle, WellStyle):
-        try:
+        with contextlib.suppress(ValueError):
             cls.from_dict(data)
-        except ValueError:
-            pass

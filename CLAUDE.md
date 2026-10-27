@@ -3,8 +3,9 @@
 Cross-platform desktop GIS for petroleum engineering and reservoir geology. It focuses on wells,
 logs and subsurface data. It is not a QGIS clone. Phase 1 is complete (see ROADMAP.md).
 
-Phase 2 follows `docs/phase2-plan.md`: core QGIS parity, interleaved with the subsurface designs in
-`docs/phase2.md`. Every Phase 2 milestone must pass that plan's quality gates and security baseline.
+Work after Phase 1 follows the stages in `docs/product-plan.md` (Foundation, MVP, Beta, Production
+1.0, after 1.0). Milestone specs and the quality gates are in `docs/phase2-plan.md`, and subsurface
+designs in `docs/phase2.md`. Every milestone must pass phase2-plan.md's quality gates and security baseline.
 In particular, project and style files never contain executable code, credentials live only in
 the OS keychain, and data-derived text is never rendered as markup.
 
@@ -15,6 +16,8 @@ uv sync                                   # install (creates .venv, Python pinne
 uv run petrogis                           # run the app
 uv run petrogis path/to/project.pgis      # run and open a project
 uv run pytest                             # tests (Qt tests run offscreen via tests/conftest.py)
+uv run pytest -m "not perf" --cov=petrogis.core --cov=petrogis.io --cov-fail-under=90  # coverage gate
+uv run pytest -m perf                     # speed budgets only (run without coverage)
 uv run ruff check . && uv run ruff format --check .   # lint + format check
 uv run ruff format .                      # format
 uv run python scripts/make_sample_data.py # generate the synthetic demo field into sample_data/
@@ -113,6 +116,15 @@ The app must stay responsive with real field data.
   `petrogis.app.main`. Keep it passing.
 - After each milestone, run ruff, pytest and the offscreen screenshot (`--demo`), and look at the
   image.
+- Timing tests carry `@pytest.mark.perf`. Coverage tracing slows code, so CI runs them separately
+  from the coverage run. Mark any new timing test the same way.
+- Malformed-input tests (`tests/io/test_malformed_inputs.py`, hypothesis) cover every reader of
+  untrusted files. A new reader gets a property-based test there.
+- Data-derived text in widgets: use `ui/text.py` (`plain_label`, `as_rich_text`) or `html.escape`;
+  `tests/ui/test_text_safety.py` must cover any new display path.
+- CI (`.github/workflows/ci.yml`) pins actions to commit SHAs. When updating an action, look up the
+  new commit SHA with `git ls-remote` and keep the tag in a comment. pyright and pip-audit run only
+  in CI (`uv run --with pyright==…`, `uvx pip-audit==…`), not in the local dev group.
 
 ## Pitfalls
 

@@ -102,6 +102,7 @@ def test_deterministic(tmp_path):
     assert a.las_files[0].read_text() == b.las_files[0].read_text()
 
 
+@pytest.mark.perf
 def test_generation_is_fast(tmp_path):
     start = time.perf_counter()
     sd.generate(tmp_path, seed=1)

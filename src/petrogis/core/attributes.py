@@ -80,7 +80,8 @@ class IdentifyHit:
 
 
 def _feature_title(layer: FeatureLayer, position: int) -> str:
-    assert layer.gdf is not None
+    if layer.gdf is None:
+        return f"Feature {position + 1}"
     for column in ("name", "Name", "NAME", "id", "ID"):
         if column in layer.gdf.columns:
             text = format_value(layer.gdf[column].iloc[position])

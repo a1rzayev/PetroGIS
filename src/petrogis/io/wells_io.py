@@ -12,9 +12,12 @@ from __future__ import annotations
 import csv
 import logging
 import re
+import warnings
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import numpy as np
 
 from petrogis.core.crs import crs_equal, normalize_crs
 from petrogis.core.layers import WellLayer
@@ -94,6 +97,8 @@ class WellTable:
     mapping: ColumnMapping
     """Auto-detected mapping. May be incomplete."""
     suggested_crs: str | None
+    read_warnings: list[str] = field(default_factory=list)
+    """Problems noticed while reading (for example ragged rows), shown with the import result."""
     """``EPSG:4326`` when the headers or values look like longitude/latitude, else ``None``."""
 
     @property
@@ -158,18 +163,29 @@ def read_well_table(path: str | Path, sheet: str | None = None) -> WellTable:
     suffix = path.suffix.lower()
     if suffix not in WELL_TABLE_EXTENSIONS:
         raise DataReadError(f"Unsupported well header format: {path.suffix or path.name}")
+    read_warnings: list[str] = []
     try:
         if suffix in {".xlsx", ".xlsm"}:
             data = pd.read_excel(path, sheet_name=sheet or 0, engine="openpyxl")
         else:
-            data = pd.read_csv(path, sep=_sniff_delimiter(path), encoding="utf-8-sig")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always", pd.errors.ParserWarning)
+                # index_col=False: never turn surplus cells in ragged rows into a row index.
+                data = pd.read_csv(
+                    path, sep=_sniff_delimiter(path), encoding="utf-8-sig", index_col=False
+                )
+            if any(issubclass(w.category, pd.errors.ParserWarning) for w in caught):
+                read_warnings.append(
+                    "Some rows have more cells than the header; the extra cells were ignored"
+                )
     except Exception as exc:  # pandas/openpyxl parse errors vary
         raise DataReadError(f"Cannot read {path.name}: {exc}") from exc
     if data.empty:
         raise DataReadError(f"{path.name} contains no rows")
+    data = data.reset_index(drop=True)
     data.columns = [str(c).strip() for c in data.columns]
     mapping = detect_columns(list(data.columns))
-    return WellTable(path, data, sheet, mapping, _suggest_crs(data, mapping))
+    return WellTable(path, data, sheet, mapping, _suggest_crs(data, mapping), read_warnings)
 
 
 def _suggest_crs(data: pd.DataFrame, mapping: ColumnMapping) -> str | None:
@@ -204,14 +220,15 @@ def build_well_layer(
         raise DataReadError(f"Columns not found in {table.path.name}: {', '.join(absent)}")
 
     df = table.data
-    warnings: list[str] = []
+    messages: list[str] = list(table.read_warnings)
     names = df[mapping.name].astype("string").str.strip()
     x = pd.to_numeric(df[mapping.x], errors="coerce")
     y = pd.to_numeric(df[mapping.y], errors="coerce")
     valid = names.notna() & (names != "") & x.notna() & y.notna()
     if not valid.all():
-        bad_rows = [int(i) + 2 for i in df.index[~valid][:10]]  # +2: header row and 1-based
-        warnings.append(
+        # Positional, so the report is right whatever index the frame carries (+2: header, 1-based).
+        bad_rows = [int(i) + 2 for i in np.flatnonzero(~valid.to_numpy())[:10]]
+        messages.append(
             f"Skipped {int((~valid).sum())} row(s) with a missing name or coordinates "
             f"(file rows {', '.join(map(str, bad_rows))}{'…' if (~valid).sum() > 10 else ''})"
         )
@@ -239,7 +256,7 @@ def build_well_layer(
     duplicates = out["name_key"][out["name_key"].duplicated()].unique()
     if len(duplicates):
         listed = ", ".join(map(str, duplicates[:10]))
-        warnings.append(f"Duplicate well names (the first one is used for matching): {listed}")
+        messages.append(f"Duplicate well names (the first one is used for matching): {listed}")
 
     source_crs = normalize_crs(source_crs)
     gdf = gpd.GeoDataFrame(
@@ -249,7 +266,7 @@ def build_well_layer(
     )
     if not crs_equal(source_crs, project_crs):
         gdf = gdf.to_crs(project_crs)
-    for message in warnings:
+    for message in messages:
         log.warning("%s: %s", table.path.name, message)
 
     layer = WellLayer(
@@ -262,7 +279,7 @@ def build_well_layer(
             "sheet": table.sheet,
         },
     )
-    return WellImportResult(layer=layer, warnings=warnings)
+    return WellImportResult(layer=layer, warnings=messages)
 
 
 def load_well_layer(

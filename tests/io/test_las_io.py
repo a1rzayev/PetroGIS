@@ -89,6 +89,7 @@ def test_attach_logs_replaces_same_source_and_emits(sample_field):
     assert len(layer.log_sources) == 10
 
 
+@pytest.mark.perf
 def test_batch_read_is_fast(sample_field):
     paths = sample_field.las_files * 5
     start = time.perf_counter()
