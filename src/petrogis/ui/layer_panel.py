@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 from petrogis.core.layers import Layer, LayerKind
 from petrogis.core.project import Project
 from petrogis.ui.project_bridge import ProjectBridge
+from petrogis.ui.text import as_rich_text
 
 LAYER_ID_ROLE = Qt.ItemDataRole.UserRole
 
@@ -96,7 +97,7 @@ class LayerPanel(QListWidget):
             LayerKind.WELLS: QStyle.StandardPixmap.SP_FileDialogDetailedView,
         }.get(layer.kind, QStyle.StandardPixmap.SP_FileIcon)
         item.setIcon(self.style().standardIcon(icon))
-        item.setToolTip(f"{layer.kind.value}: {layer.source}")
+        item.setToolTip(as_rich_text(f"{layer.kind.value}: {layer.source}"))
         return item
 
     def _rebuild(self) -> None:

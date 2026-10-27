@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from petrogis.core.layers import RasterInfo
 from petrogis.core.styles import COLORMAPS, RasterStyle
+from petrogis.ui.text import plain_label
 
 
 class RasterStyleDialog(QDialog):
@@ -65,7 +66,7 @@ class RasterStyleDialog(QDialog):
         self.vmin.valueChanged.connect(self._validate)
         self.vmax.valueChanged.connect(self._validate)
 
-        stats = QLabel(
+        stats = plain_label(
             f"Data range {info.stats_min:.2f} – {info.stats_max:.2f}"
             + (f"  ({info.description})" if info.description else "")
         )

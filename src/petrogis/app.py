@@ -64,6 +64,8 @@ def main() -> int:
     project_args = [arg for arg in sys.argv[1:] if arg.lower().endswith(".pgis")]
     if project_args:
         window.open_project(project_args[0])
+    else:
+        window.offer_untitled_recovery()
     return app.exec()
 
 

@@ -7,7 +7,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QStandardPaths, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -28,13 +28,16 @@ from petrogis.core.layers import FeatureLayer, Layer, RasterLayer, VectorLayer, 
 from petrogis.core.logs import match_logs
 from petrogis.core.project import Project
 from petrogis.core.styles import VECTOR_PALETTE
-from petrogis.io.errors import MissingCRSError
+from petrogis.io.errors import DataReadError, MissingCRSError
 from petrogis.io.las_io import LAS_FILE_FILTER, LasBatch, read_las_files
 from petrogis.io.project_io import (
     PROJECT_FILE_FILTER,
     LoadedProject,
+    autosave_path,
+    find_recovery,
     load_project,
     save_project,
+    write_project_file,
 )
 from petrogis.io.raster_io import RASTER_FILE_FILTER, load_raster_layer, sample_raster
 from petrogis.io.vector_io import VECTOR_FILE_FILTER, list_layers, load_vector_layer
@@ -62,11 +65,36 @@ from petrogis.ui.log_viewer import LogViewer
 from petrogis.ui.map_controller import MapController
 from petrogis.ui.project_bridge import ProjectBridge
 from petrogis.ui.recent import RecentProjects
+from petrogis.ui.text import as_rich_text
 from petrogis.ui.workers import TaskRunner
 
 log = logging.getLogger(__name__)
 
 MULTI_LAYER_SUFFIXES = {".gpkg", ".kml"}
+
+
+AUTOSAVE_INTERVAL_MS = 120_000
+
+
+def default_autosave_dir() -> Path:
+    """Where autosaves of untitled projects go (saved projects autosave next to their file)."""
+    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppLocalDataLocation)
+    return Path(base) / "autosave"
+
+
+def ask_restore_autosave(parent: QWidget, autosave: Path) -> bool:
+    """Ask whether to restore work found in an autosave file."""
+    answer = QMessageBox.question(
+        parent,
+        "Recover Unsaved Work",
+        as_rich_text(
+            f"PetroGIS found unsaved changes from a previous session ({autosave.name}).\n"
+            "Restore them?"
+        ),
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        QMessageBox.StandardButton.Yes,
+    )
+    return answer == QMessageBox.StandardButton.Yes
 
 
 def ask_save_changes(parent: QWidget) -> str:
@@ -153,6 +181,12 @@ class MainWindow(QMainWindow):
         # Bumped whenever the project is replaced, so background results that belong to the
         # previous project are dropped instead of leaking into the new one.
         self._generation = 0
+
+        self.autosave_dir = default_autosave_dir()
+        self.autosave_timer = QTimer(self)
+        self.autosave_timer.setInterval(AUTOSAVE_INTERVAL_MS)
+        self.autosave_timer.timeout.connect(self.autosave_now)
+        self.autosave_timer.start()
 
         self.identify_dialog = IdentifyDialog(self)
         self.identify_dialog.hit_selected.connect(self._highlight_hit)
@@ -335,7 +369,7 @@ class MainWindow(QMainWindow):
 
     def _show_crs(self, crs: str) -> None:
         self.crs_label.setText(crs)
-        self.crs_label.setToolTip(crs_label(crs))
+        self.crs_label.setToolTip(as_rich_text(crs_label(crs)))
 
     def _show_about(self) -> None:
         QMessageBox.about(
@@ -373,7 +407,12 @@ class MainWindow(QMainWindow):
                 return
             if len(sheets) > 1:
                 sheet, ok = QInputDialog.getItem(
-                    self, "Select Sheet", f"{path.name} has several sheets:", sheets, 0, False
+                    self,
+                    "Select Sheet",
+                    as_rich_text(f"{path.name} has several sheets:"),
+                    sheets,
+                    0,
+                    False,
                 )
                 if not ok:
                     return
@@ -643,7 +682,7 @@ class MainWindow(QMainWindow):
         text, ok = QInputDialog.getText(
             self,
             "Coordinate Reference System",
-            f"{exc}\n\nEnter the CRS of the data (e.g. EPSG:32639 or EPSG:4326):",
+            as_rich_text(f"{exc}\n\nEnter the CRS of the data (e.g. EPSG:32639 or EPSG:4326):"),
             text=self.project.crs,
         )
         if not ok or not text.strip():
@@ -709,9 +748,43 @@ class MainWindow(QMainWindow):
             return self.save_project()
         return True
 
+    # --- autosave and recovery -------------------------------------------------------------------
+    def autosave_now(self) -> Path | None:
+        """Write unsaved changes to the autosave sidecar. Returns its path, or None if skipped."""
+        if not self.project.dirty or (len(self.project) == 0 and self.project.path is None):
+            return None
+        target = autosave_path(self.project.path, self.autosave_dir)
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            write_project_file(self.project, target, view=self.canvas.view_extent())
+        except (OSError, DataReadError) as exc:
+            # Autosave runs on a timer, so a dialog every two minutes would be worse than useless.
+            log.warning("Autosave to %s failed: %s", target, exc)
+            self.statusBar().showMessage(f"Autosave failed: {exc}", 8000)
+            return None
+        return target
+
+    def _discard_autosave(self, project_path: str | Path | None) -> None:
+        target = autosave_path(project_path, self.autosave_dir)
+        try:
+            target.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("Could not remove autosave %s: %s", target, exc)
+
+    def offer_untitled_recovery(self) -> None:
+        """At startup, offer to restore an untitled project left behind by a crash."""
+        recovery = find_recovery(None, self.autosave_dir)
+        if recovery is None:
+            return
+        if not ask_restore_autosave(self, recovery):
+            self._discard_autosave(None)
+            return
+        self._load_project_file(recovery, recovered=True, target=None)
+
     def new_project(self) -> None:
         if not self.maybe_save():
             return
+        self._discard_autosave(self.project.path)
         self._generation += 1
         self.project.clear()
         self.project.set_crs(DEFAULT_PROJECT_CRS)
@@ -735,11 +808,14 @@ class MainWindow(QMainWindow):
         return self._write_project(path)
 
     def _write_project(self, path: str | Path) -> bool:
+        previous_path = self.project.path
         try:
             saved = save_project(self.project, path, view=self.canvas.view_extent())
         except Exception as exc:  # noqa: BLE001 - shown to the user
             show_error(self, "Cannot save project", str(exc), exc)
             return False
+        self._discard_autosave(previous_path)
+        self._discard_autosave(saved)
         self.recent.add(saved)
         self._update_title()
         self.statusBar().showMessage(f"Saved {saved.name}", 3000)
@@ -754,30 +830,53 @@ class MainWindow(QMainWindow):
                 return
             path = chosen
         path = Path(path)
-        self.statusBar().showMessage(f"Opening {path.name}…")
+        self._discard_autosave(self.project.path)
+        recovery = find_recovery(path, self.autosave_dir)
+        if recovery is not None:
+            if ask_restore_autosave(self, recovery):
+                self._load_project_file(recovery, recovered=True, target=path)
+                return
+            self._discard_autosave(path)
+        self._load_project_file(path)
+
+    def _load_project_file(
+        self, source: Path, recovered: bool = False, target: Path | None = None
+    ) -> None:
+        """Load ``source`` in the background. A recovered autosave takes ``target`` as its path."""
+        self.statusBar().showMessage(f"Opening {source.name}…")
         self._generation += 1  # layers still loading belong to the project being replaced
         self.tasks.submit(
             load_project,
-            path,
-            on_result=self._current(self._on_project_loaded),
-            on_error=self._current(lambda exc: self._on_project_failed(path, exc)),
+            source,
+            on_result=self._current(
+                lambda loaded: self._on_project_loaded(loaded, recovered=recovered, target=target)
+            ),
+            on_error=self._current(lambda exc: self._on_project_failed(source, exc)),
         )
 
-    def _on_project_loaded(self, loaded: LoadedProject) -> None:
+    def _on_project_loaded(
+        self, loaded: LoadedProject, recovered: bool = False, target: Path | None = None
+    ) -> None:
         self.project.clear()
         self.project.set_crs(loaded.project.crs)
         for layer in reversed(loaded.project.layers):
             self.project.add_layer(layer)
-        self.project.path = loaded.project.path
-        self.project.dirty = False
         if loaded.view is not None:
             self.canvas.set_view_extent(loaded.view)
         else:
             self.zoom_to_full_extent()
-        assert self.project.path is not None
-        self.recent.add(self.project.path)
+        if recovered:
+            # The restored state is unsaved work: keep the original identity and mark it dirty.
+            self.project.path = None if target is None else str(target)
+            self.project.dirty = True
+            self.statusBar().showMessage("Recovered unsaved changes. Save to keep them.", 8000)
+        else:
+            self.project.path = loaded.project.path
+            self.project.dirty = False
+            if self.project.path is not None:
+                self.recent.add(self.project.path)
+                self.statusBar().showMessage(f"Opened {Path(self.project.path).name}", 3000)
         self._update_title()
-        self.statusBar().showMessage(f"Opened {Path(self.project.path).name}", 3000)
         if loaded.warnings:
             show_warning(self, "Project opened with problems", "\n".join(loaded.warnings))
 
@@ -792,7 +891,7 @@ class MainWindow(QMainWindow):
         paths = self.recent.paths()
         for entry in paths:
             action = self.recent_menu.addAction(Path(entry).name)
-            action.setToolTip(entry)
+            action.setToolTip(as_rich_text(entry))
             action.setStatusTip(entry)
             action.triggered.connect(lambda _checked=False, p=entry: self.open_project(p))
         if paths:
@@ -805,6 +904,9 @@ class MainWindow(QMainWindow):
         if not self.maybe_save():
             event.ignore()
             return
+        # The user saved or chose to discard, so the autosave is no longer wanted.
+        self._discard_autosave(self.project.path)
+        self.autosave_timer.stop()
         self.tasks.shutdown()
         self.bridge.detach()
         super().closeEvent(event)

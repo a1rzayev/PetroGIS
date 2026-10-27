@@ -19,6 +19,8 @@ def _no_modal_prompts(monkeypatch, tmp_path):
     from petrogis.ui.recent import RecentProjects
 
     monkeypatch.setattr(main_window, "ask_save_changes", lambda parent: "discard")
+    monkeypatch.setattr(main_window, "ask_restore_autosave", lambda parent, path: False)
+    monkeypatch.setattr(main_window, "default_autosave_dir", lambda: tmp_path / "autosave")
     settings = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     monkeypatch.setattr(main_window, "RecentProjects", lambda: RecentProjects(settings))
 

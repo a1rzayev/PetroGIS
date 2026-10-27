@@ -140,3 +140,49 @@ def test_save_failure_leaves_no_temp_file(tmp_path):
     with pytest.raises(DataReadError, match="Cannot save"):
         save_project(Project(), target)
     assert not list(tmp_path.glob("**/*.tmp"))
+
+
+def test_save_keeps_backup_of_previous_version(tmp_path):
+    from petrogis.io.project_io import backup_path
+
+    path = tmp_path / "p.pgis"
+    project = Project()
+    save_project(project, path)
+    first = path.read_text()
+    project.set_crs("EPSG:4326")
+    save_project(project, path)
+    assert backup_path(path).read_text() == first
+    assert json.loads(path.read_text())["crs"] == "EPSG:4326"
+
+
+def test_write_project_file_leaves_state_alone(tmp_path):
+    from petrogis.io.project_io import write_project_file
+
+    project = Project()
+    project.set_crs("EPSG:4326")
+    assert project.dirty
+    write_project_file(project, tmp_path / "x.pgis.autosave")
+    assert project.dirty and project.path is None
+
+
+def test_find_recovery(tmp_path):
+    import os
+
+    from petrogis.io.project_io import autosave_path, find_recovery
+
+    auto_dir = tmp_path / "auto"
+    auto_dir.mkdir()
+    assert autosave_path(None, auto_dir) == auto_dir / "untitled.pgis.autosave"
+    assert find_recovery(None, auto_dir) is None
+    (auto_dir / "untitled.pgis.autosave").write_text("{}")
+    assert find_recovery(None, auto_dir) == auto_dir / "untitled.pgis.autosave"
+
+    project = tmp_path / "p.pgis"
+    project.write_text("{}")
+    sidecar = autosave_path(project, auto_dir)
+    assert sidecar == tmp_path / "p.pgis.autosave"
+    sidecar.write_text("{}")
+    os.utime(sidecar, (1_000, 1_000))  # older than the project: stale
+    assert find_recovery(project, auto_dir) is None
+    os.utime(sidecar, (4_000_000_000, 4_000_000_000))
+    assert find_recovery(project, auto_dir) == sidecar

@@ -6,11 +6,12 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QDialog,
     QDialogButtonBox,
-    QLabel,
     QListWidget,
     QVBoxLayout,
     QWidget,
 )
+
+from petrogis.ui.text import plain_label
 
 
 class LayerPickerDialog(QDialog):
@@ -27,7 +28,7 @@ class LayerPickerDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"{source_name} contains several layers:"))
+        layout.addWidget(plain_label(f"{source_name} contains several layers:"))
         layout.addWidget(self.list)
         layout.addWidget(buttons)
 

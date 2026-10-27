@@ -23,6 +23,7 @@ from petrogis.io.wells_io import (
     ColumnMapping,
     WellTable,
 )
+from petrogis.ui.text import plain_label
 
 NONE_LABEL = "(none)"
 PREVIEW_ROWS = 8
@@ -55,7 +56,7 @@ class ColumnMappingDialog(QDialog):
 
         self.crs_edit = QLineEdit(table.suggested_crs or default_crs)
         self.crs_edit.textChanged.connect(self._validate)
-        self.crs_info = QLabel()
+        self.crs_info = plain_label()
         form.addRow("Coordinate CRS *", self.crs_edit)
         form.addRow("", self.crs_info)
 
@@ -78,7 +79,7 @@ class ColumnMappingDialog(QDialog):
         intro = "Choose which columns hold the well name and surface coordinates."
         layout.addWidget(QLabel(intro))
         layout.addLayout(form)
-        layout.addWidget(QLabel(f"Preview ({len(table.data)} rows):"))
+        layout.addWidget(plain_label(f"Preview ({len(table.data)} rows):"))
         layout.addWidget(preview)
         layout.addWidget(self.error)
         layout.addWidget(self.buttons)

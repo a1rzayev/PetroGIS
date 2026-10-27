@@ -5,6 +5,7 @@ import sys
 import traceback
 from types import TracebackType
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 log = logging.getLogger(__name__)
@@ -18,7 +19,7 @@ def show_error(
         log.error("%s: %s", title, message, exc_info=exc)
     else:
         log.error("%s: %s", title, message)
-    box = QMessageBox(QMessageBox.Icon.Critical, title, message, parent=parent)
+    box = make_message_box(QMessageBox.Icon.Critical, title, message, parent)
     if exc is not None:
         box.setDetailedText("".join(traceback.format_exception(exc)))
     box.exec()
@@ -27,7 +28,21 @@ def show_error(
 def show_warning(parent: QWidget | None, title: str, message: str) -> None:
     """Log ``message`` as a warning and show it in a modal dialog."""
     log.warning("%s: %s", title, message)
-    QMessageBox.warning(parent, title, message)
+    make_message_box(QMessageBox.Icon.Warning, title, message, parent).exec()
+
+
+def make_message_box(
+    icon: QMessageBox.Icon, title: str, message: str, parent: QWidget | None
+) -> QMessageBox:
+    """A message box that always shows ``message`` as plain text.
+
+    Messages contain file names, well names and library error text. With Qt's default
+    auto-detected format, any of these could be interpreted as HTML.
+    """
+    box = QMessageBox(icon, title, "", parent=parent)
+    box.setTextFormat(Qt.TextFormat.PlainText)
+    box.setText(message)
+    return box
 
 
 def install_excepthook() -> None:

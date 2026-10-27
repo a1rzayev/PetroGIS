@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, fields
 from typing import Any, Self
@@ -13,9 +14,22 @@ VECTOR_PALETTE = ("#e41a1c", "#000000", "#ff7f00", "#f781bf", "#984ea3", "#a6562
 """Default colours for new vector layers, picked to stand out on the raster colormaps."""
 
 
-def _check_color(value: str) -> None:
-    if not _HEX_COLOR.match(value):
+def _check_color(value: object) -> None:
+    if not isinstance(value, str) or not _HEX_COLOR.match(value):
         raise ValueError(f"Colour must be '#rrggbb', got {value!r}")
+
+
+def _check_number(name: str, value: object, minimum: float | None = None) -> None:
+    """Reject non-numbers, booleans, NaN/inf and values below ``minimum``."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        raise ValueError(f"{name} must be a finite number, got {value!r}")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}, got {value!r}")
+
+
+def _check_bool(name: str, value: object) -> None:
+    if not isinstance(value, bool):
+        raise ValueError(f"{name} must be true or false, got {value!r}")
 
 
 class _Serializable:
@@ -39,9 +53,12 @@ class VectorStyle(_Serializable):
 
     def __post_init__(self) -> None:
         _check_color(self.color)
+        _check_number("line_width", self.line_width, minimum=0.1)
+        _check_number("point_size", self.point_size, minimum=0.1)
         if self.point_symbol not in POINT_SYMBOLS:
             raise ValueError(f"Unknown point symbol {self.point_symbol!r}")
-        if not 0.0 <= self.opacity <= 1.0:
+        _check_number("opacity", self.opacity, minimum=0.0)
+        if self.opacity > 1.0:
             raise ValueError("Opacity must be between 0 and 1")
 
 
@@ -57,8 +74,9 @@ class WellStyle(_Serializable):
     def __post_init__(self) -> None:
         _check_color(self.color)
         _check_color(self.label_color)
-        if self.symbol_size <= 0 or self.label_size <= 0:
-            raise ValueError("Sizes must be positive")
+        _check_number("symbol_size", self.symbol_size, minimum=0.1)
+        _check_number("label_size", self.label_size, minimum=0.1)
+        _check_bool("show_labels", self.show_labels)
 
 
 @dataclass
@@ -74,7 +92,12 @@ class RasterStyle(_Serializable):
     def __post_init__(self) -> None:
         if self.colormap not in COLORMAPS:
             raise ValueError(f"Unknown colormap {self.colormap!r}")
+        for name in ("vmin", "vmax"):
+            if getattr(self, name) is not None:
+                _check_number(name, getattr(self, name))
         if self.vmin is not None and self.vmax is not None and self.vmin >= self.vmax:
             raise ValueError("vmin must be less than vmax")
-        if not 0.0 <= self.opacity <= 1.0:
+        _check_bool("invert", self.invert)
+        _check_number("opacity", self.opacity, minimum=0.0)
+        if self.opacity > 1.0:
             raise ValueError("Opacity must be between 0 and 1")

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from html import escape
 from pathlib import Path
 
 import numpy as np
@@ -149,7 +150,7 @@ class LogViewer(QWidget):
         if self.logs:
             self.set_log(self.logs[0])
         else:
-            self.clear(f"<b>{well_name}</b>: no logs loaded for this well.")
+            self.clear(f"<b>{escape(well_name)}</b>: no logs loaded for this well.")
 
     def _on_source_changed(self, index: int) -> None:
         if 0 <= index < len(self.logs):
@@ -158,12 +159,13 @@ class LogViewer(QWidget):
     def set_log(self, log: WellLog) -> None:
         self.current = log
         well_name, uwi, kb = getattr(self, "_well", (log.well_name, log.uwi, None))
-        details = [f"<b>{well_name}</b>"]
+        # Rich-text header built from data-file values: escape every part.
+        details = [f"<b>{escape(well_name)}</b>"]
         if uwi:
-            details.append(f"UWI {uwi}")
+            details.append(f"UWI {escape(uwi)}")
         if kb is not None and math.isfinite(kb):
             details.append(f"KB {kb:.1f}")
-        details.append(Path(log.source).name)
+        details.append(escape(Path(log.source).name))
         self.header.setText(" · ".join(details))
 
         depth = log.depth
@@ -179,7 +181,7 @@ class LogViewer(QWidget):
         self._set_curve(self.rhob_curve, depth, _plot_values(rhob, RHOB_SCALE))
         self.nd_plot.getAxis("bottom").setLabel(self._title(RHOB_SCALE, rhob))
 
-        self.gr_plot.getAxis("left").setLabel(f"MD ({log.depth_unit})")
+        self.gr_plot.getAxis("left").setLabel(f"MD ({escape(log.depth_unit)})")
         top, bottom = log.depth_range
         if math.isfinite(top) and math.isfinite(bottom):
             self.gr_plot.setYRange(top, bottom, padding=0.01)
@@ -197,7 +199,7 @@ class LogViewer(QWidget):
         if curve is None:
             return f"{scale.family.value} (missing)"
         unit = f" [{curve.unit}]" if curve.unit else ""
-        return f"{curve.mnemonic}{unit}"
+        return escape(f"{curve.mnemonic}{unit}")  # pyqtgraph axis labels are HTML
 
     def clear(self, message: str = EMPTY_TEXT) -> None:
         self.current = None

@@ -47,19 +47,22 @@ def read_las(path: str | Path) -> WellLog:
     if not las.curves:
         raise DataReadError(f"{path.name} has no curves")
 
-    depth = np.asarray(las.index, dtype=np.float64)
-    if depth.size == 0:
+    try:
+        depth = np.asarray(las.index, dtype=np.float64)
+        curves = {
+            curve.mnemonic: LogCurve(
+                mnemonic=curve.mnemonic,
+                unit=str(curve.unit or ""),
+                description=str(curve.descr or ""),
+                values=np.asarray(curve.data, dtype=np.float64),
+            )
+            for curve in las.curves[1:]
+        }
+    except (TypeError, ValueError) as exc:
+        raise DataReadError(f"{path.name} contains non-numeric log data: {exc}") from exc
+    if depth.ndim != 1 or depth.size == 0:
         raise DataReadError(f"{path.name} has no data rows")
     index_curve = las.curves[0]
-    curves = {
-        curve.mnemonic: LogCurve(
-            mnemonic=curve.mnemonic,
-            unit=str(curve.unit or ""),
-            description=str(curve.descr or ""),
-            values=np.asarray(curve.data, dtype=np.float64),
-        )
-        for curve in las.curves[1:]
-    }
     well_name = _header_value(las, "WELL") or path.stem
     return WellLog(
         well_name=well_name,
