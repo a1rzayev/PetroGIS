@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 
@@ -143,6 +144,15 @@ class MainWindow(QMainWindow):
         self.bridge.layer_removed.connect(self._on_layer_removed)
         self.bridge.layer_changed.connect(self._on_layer_changed)
         self.bridge.cleared.connect(lambda: self._on_layer_removed(self.attribute_table.layer_id))
+
+        self.map_controller.raster_read_failed.connect(
+            lambda name, message: self.statusBar().showMessage(
+                f"Could not draw raster {name}: {message}", 8000
+            )
+        )
+        # Bumped whenever the project is replaced, so background results that belong to the
+        # previous project are dropped instead of leaking into the new one.
+        self._generation = 0
 
         self.identify_dialog = IdentifyDialog(self)
         self.identify_dialog.hit_selected.connect(self._highlight_hit)
@@ -372,8 +382,8 @@ class MainWindow(QMainWindow):
             read_well_table,
             path,
             sheet,
-            on_result=self._on_well_table,
-            on_error=lambda exc: self._on_load_failed(path, exc),
+            on_result=self._current(self._on_well_table),
+            on_error=self._current(lambda exc: self._on_load_failed(path, exc)),
         )
 
     def _on_well_table(self, table: WellTable) -> None:
@@ -392,8 +402,8 @@ class MainWindow(QMainWindow):
             mapping,
             source_crs,
             self.project.crs,
-            on_result=self._on_wells_built,
-            on_error=lambda exc: self._on_load_failed(table.path, exc),
+            on_result=self._current(self._on_wells_built),
+            on_error=self._current(lambda exc: self._on_load_failed(table.path, exc)),
         )
 
     def _on_wells_built(self, result: WellImportResult) -> None:
@@ -430,12 +440,16 @@ class MainWindow(QMainWindow):
         self.tasks.submit(
             read_las_files,
             list(paths),
-            on_result=lambda batch: self._on_las_read(layer_id, batch),
-            on_error=lambda exc: self._on_load_failed(Path(paths[0]), exc),
+            on_result=self._current(lambda batch: self._on_las_read(layer_id, batch)),
+            on_error=self._current(lambda exc: self._on_load_failed(Path(paths[0]), exc)),
         )
 
     def _on_las_read(self, layer_id: str, batch: LasBatch) -> None:
-        layer = self.project.get(layer_id)
+        try:
+            layer = self.project.get(layer_id)
+        except KeyError:
+            self.statusBar().showMessage("LAS import discarded: the well layer was removed", 5000)
+            return
         assert isinstance(layer, WellLayer)
         match = match_logs(batch.logs, layer)
         added = self.project.attach_logs(layer_id, match.matched)
@@ -583,8 +597,8 @@ class MainWindow(QMainWindow):
             self.project.crs,
             layer=layer,
             assume_crs=assume_crs,
-            on_result=self._on_layer_loaded,
-            on_error=lambda exc: self._on_vector_failed(path, layer, exc),
+            on_result=self._current(self._on_layer_loaded),
+            on_error=self._current(lambda exc: self._on_vector_failed(path, layer, exc)),
         )
 
     def load_raster(self, path: str | Path) -> None:
@@ -593,9 +607,21 @@ class MainWindow(QMainWindow):
             load_raster_layer,
             path,
             self.project.crs,
-            on_result=self._on_layer_loaded,
-            on_error=lambda exc: self._on_load_failed(path, exc),
+            on_result=self._current(self._on_layer_loaded),
+            on_error=self._current(lambda exc: self._on_load_failed(path, exc)),
         )
+
+    def _current(self, fn: Callable[..., None]) -> Callable[..., None]:
+        """Wrap a background callback so it is ignored if the project was replaced meanwhile."""
+        generation = self._generation
+
+        def guarded(*args: object) -> None:
+            if generation == self._generation:
+                fn(*args)
+            else:
+                log.info("Dropped a background result that belonged to a previous project")
+
+        return guarded
 
     def _on_layer_loaded(self, layer: Layer) -> None:
         first = len(self.project) == 0
@@ -686,6 +712,7 @@ class MainWindow(QMainWindow):
     def new_project(self) -> None:
         if not self.maybe_save():
             return
+        self._generation += 1
         self.project.clear()
         self.project.set_crs(DEFAULT_PROJECT_CRS)
         self.project.dirty = False
@@ -728,11 +755,12 @@ class MainWindow(QMainWindow):
             path = chosen
         path = Path(path)
         self.statusBar().showMessage(f"Opening {path.name}…")
+        self._generation += 1  # layers still loading belong to the project being replaced
         self.tasks.submit(
             load_project,
             path,
-            on_result=self._on_project_loaded,
-            on_error=lambda exc: self._on_project_failed(path, exc),
+            on_result=self._current(self._on_project_loaded),
+            on_error=self._current(lambda exc: self._on_project_failed(path, exc)),
         )
 
     def _on_project_loaded(self, loaded: LoadedProject) -> None:
@@ -777,5 +805,6 @@ class MainWindow(QMainWindow):
         if not self.maybe_save():
             event.ignore()
             return
+        self.tasks.shutdown()
         self.bridge.detach()
         super().closeEvent(event)

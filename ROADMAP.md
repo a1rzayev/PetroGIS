@@ -15,7 +15,7 @@
       (GR | resistivity log-scale | NPHI+RHOB, shared inverted depth)
 - [x] M6 — Identify tool + attribute table dock
 - [x] M7 — Project save/open (.pgis) + recent projects
-- [ ] M8 — Hardening: error paths, clean-checkout test run, definition-of-done walkthrough
+- [x] M8 — Hardening: error paths, clean-checkout test run, definition-of-done walkthrough
 - [ ] M9 — Docs polish, Phase 2 notes
 
 ## Phase 2+ — Planned (design for, not built yet)

@@ -95,7 +95,9 @@ class PgMapCanvas(pg.PlotWidget):
         for item in graphics.items:
             self.removeItem(item)
 
-    def clear(self) -> None:
+    def clear_layers(self) -> None:
+        # Not named ``clear``: pg.PlotWidget sets ``clear`` as an instance attribute forwarding to
+        # PlotItem.clear, which would silently shadow an override and wipe the whole scene.
         for layer_id in list(self._layers):
             self.remove_layer(layer_id)
 

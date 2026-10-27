@@ -35,6 +35,8 @@ def setup_logging() -> Path:
     root.setLevel(logging.INFO)
     root.addHandler(file_handler)
     root.addHandler(stream_handler)
+    # lasio logs two INFO lines per file about encoding detection, which drowns out our messages.
+    logging.getLogger("lasio").setLevel(logging.WARNING)
     return log_file
 
 
@@ -59,7 +61,7 @@ def main() -> int:
     install_excepthook()
     window = MainWindow()
     window.show()
-    project_args = [arg for arg in app.arguments()[1:] if arg.lower().endswith(".pgis")]
+    project_args = [arg for arg in sys.argv[1:] if arg.lower().endswith(".pgis")]
     if project_args:
         window.open_project(project_args[0])
     return app.exec()

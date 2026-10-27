@@ -130,3 +130,17 @@ def test_recent_menu_lists_projects(qtbot, recent, tmp_path):
     window._build_recent_menu()
     texts = [a.text() for a in window.recent_menu.actions() if not a.isSeparator()]
     assert texts == ["a.pgis", "Clear Recent"]
+
+
+def test_highlight_works_after_new_project(qtbot, recent, sample_field):
+    window = make_window(qtbot, recent)
+    window.import_wells(sample_field.wells_csv)
+    wait_idle(qtbot, window, 1)
+    window.new_project()
+    window.import_wells(sample_field.wells_csv)
+    wait_idle(qtbot, window, 1)
+    wells = window.project.layers[0]
+    window.open_attribute_table(wells.id)
+    window.attribute_table.select_position(0)
+    points = window.canvas._highlight.points
+    assert points.scene() is not None and points.data.size == 1

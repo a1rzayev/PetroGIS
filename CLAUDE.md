@@ -87,6 +87,16 @@ lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest
 - Tests: an autouse fixture in `tests/conftest.py` answers "discard" to the unsaved-changes
   prompt and points `RecentProjects` at a temporary QSettings file. New modal prompts must be
   module-level functions that can be monkeypatched the same way, or tests will hang.
+- Background results can arrive late. Wrap main-window load callbacks in `self._current(...)`,
+  which drops results once the project has been replaced (New/Open bump `_generation`).
+  Callbacks that look up a layer by id must handle `KeyError` (the user may have removed it).
+  `TaskRunner.shutdown()` runs on close, so results never reach destroyed widgets.
+- pyqtgraph pitfall: `pg.PlotWidget.__init__` sets instance attributes such as `clear`,
+  `addItem`, `removeItem`, `setRange`, `setXRange`, `setYRange`, `autoRange` and `viewRect` that
+  forward to the PlotItem, which silently shadows subclass methods with those names. Don't
+  override them; the canvas uses `clear_layers()` for this reason.
+- `tests/test_definition_of_done.py` runs the Phase 1 definition of done through the real
+  `petrogis.app.main`. Keep it passing.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`
@@ -116,7 +126,7 @@ The app must stay responsive with real field data.
 
 - Type hints everywhere. Prefer small, readable modules over clever abstractions.
 - No silent exception swallowing. In the UI, show errors with `ui.errors.show_error` (it logs with traceback
-  and opens a dialog). Logs go to the per-user data dir (`.../PetroGIS/logs/petrogis.log`).
+  and opens a dialog). Logs go to the per-user data dir (macOS: `~/Library/Application Support/PetroGIS/PetroGIS/logs/petrogis.log`). lasio is set to WARNING.
 - Tests cover everything in core/ and io/. Tests use the sample-data generator for fixtures.
 - After each milestone, run ruff, pytest and the offscreen screenshot.
 - Git: stage each logical change and propose a commit message. The maintainer commits and pushes.

@@ -44,10 +44,19 @@ class TaskRunner(QObject):
         super().__init__(parent)
         self._pool = pool or QThreadPool.globalInstance()
         self._running: set[_Task] = set()
+        self._shut_down = False
 
     @property
     def pending(self) -> int:
         return len(self._running)
+
+    def shutdown(self) -> None:
+        """Drop the callbacks of tasks still running, for example when the window closes.
+
+        Running tasks can't be interrupted, but their results are discarded instead of reaching
+        widgets that no longer exist.
+        """
+        self._shut_down = True
 
     def submit(
         self,
@@ -69,14 +78,16 @@ class TaskRunner(QObject):
 
         def finished(result: Any) -> None:
             try:
-                if on_result is not None:
+                if on_result is not None and not self._shut_down:
                     on_result(result)
             finally:
                 done()
 
         def failed(exc: BaseException) -> None:
             try:
-                if on_error is not None:
+                if self._shut_down:
+                    log.info("Discarded failure of %s after shutdown: %s", fn, exc)
+                elif on_error is not None:
                     on_error(exc)
                 else:
                     log.error(

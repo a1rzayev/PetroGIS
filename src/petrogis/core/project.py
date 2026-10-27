@@ -102,7 +102,7 @@ class Project:
             raise ValueError(f"Layer {layer.id} is already in the project")
         index = max(0, min(index, len(self._layers)))
         self._layers.insert(index, layer)
-        log.info("Added %s layer %r", layer.kind, layer.name)
+        log.debug("Added %s layer %r", layer.kind, layer.name)
         self._emit(ProjectEvent(EventKind.LAYER_ADDED, layer.id, index))
 
     def remove_layer(self, layer_id: str) -> Layer:

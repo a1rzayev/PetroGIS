@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QObject, Signal
 
 from petrogis.core.layers import RasterLayer
 from petrogis.core.project import Project
@@ -17,6 +17,8 @@ log = logging.getLogger(__name__)
 
 
 class MapController(QObject):
+    raster_read_failed = Signal(str, str)  # layer name, message
+
     def __init__(
         self,
         project: Project,
@@ -69,7 +71,7 @@ class MapController(QObject):
     def _on_cleared(self) -> None:
         self._raster_tokens.clear()
         self._raster_requests.clear()
-        self.canvas.clear()
+        self.canvas.clear_layers()
 
     def refresh_rasters(self) -> None:
         for layer in self.project.layers:
@@ -96,6 +98,7 @@ class MapController(QObject):
         def failed(exc: BaseException) -> None:
             self._raster_requests.pop(layer.id, None)
             log.error("Reading raster %s failed", layer.source, exc_info=exc)
+            self.raster_read_failed.emit(layer.name, str(exc))
 
         self.tasks.submit(
             read_raster_view,

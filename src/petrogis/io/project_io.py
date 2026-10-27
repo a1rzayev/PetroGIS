@@ -79,6 +79,7 @@ def _layer_to_dict(layer: Layer, base: Path) -> dict[str, Any]:
     }
     if isinstance(layer, VectorLayer):
         entry["source_layer"] = layer.source_layer
+        entry["assume_crs"] = layer.assumed_crs
         entry["style"] = layer.style.to_dict()
     elif isinstance(layer, RasterLayer):
         entry["band"] = layer.band
@@ -155,7 +156,9 @@ def _load_layer(entry: dict[str, Any], base: Path, crs: str, warnings: list[str]
     style = entry.get("style", {})
     layer: Layer
     if kind is LayerKind.VECTOR:
-        layer = load_vector_layer(source, crs, layer=entry.get("source_layer"))
+        layer = load_vector_layer(
+            source, crs, layer=entry.get("source_layer"), assume_crs=entry.get("assume_crs")
+        )
         layer.style = VectorStyle.from_dict(style)
     elif kind is LayerKind.RASTER:
         layer = load_raster_layer(source, crs, band=int(entry.get("band", 1)))

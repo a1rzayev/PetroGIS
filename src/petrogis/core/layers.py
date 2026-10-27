@@ -87,6 +87,8 @@ class FeatureLayer(Layer):
 class VectorLayer(FeatureLayer):
     source_layer: str | None = None
     """Layer name inside multi-layer sources (GeoPackage, KML)."""
+    assumed_crs: str | None = None
+    """CRS the user supplied for a source that declares none. Re-applied on project reload."""
     style: VectorStyle = field(default_factory=VectorStyle)
     _paths: GeometryPaths | None = field(default=None, init=False, repr=False)
 

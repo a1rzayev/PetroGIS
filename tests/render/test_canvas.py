@@ -110,3 +110,18 @@ def test_colormap_lut():
     assert lut.shape == (256, 4)
     assert tuple(lut[0][:3]) == (0, 0, 0)
     assert tuple(colormap_lut("gray", True)[0][:3]) == (255, 255, 255)
+
+
+def test_clear_layers_keeps_overlay_in_scene(canvas):
+    """Regression: pg.PlotWidget shadows ``clear`` with PlotItem.clear, which wiped the overlay."""
+    from shapely import Point
+
+    layer = _vector()
+    canvas.add_layer(layer)
+    canvas.clear_layers()
+    assert not canvas.has_layer(layer.id)
+    assert canvas.graphics.__self__ is canvas  # sanity: canvas API intact
+    highlight = canvas._highlight
+    assert all(item.scene() is not None for item in highlight.items)
+    canvas.set_highlight([Point(1, 2)])
+    assert highlight.points.scene() is not None and highlight.points.data.size == 1

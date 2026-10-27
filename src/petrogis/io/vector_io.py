@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from petrogis.core.crs import crs_equal
+from petrogis.core.crs import crs_equal, normalize_crs
 from petrogis.core.layers import VectorLayer
 from petrogis.io.errors import DataReadError, MissingCRSError
 
@@ -105,6 +105,12 @@ def load_vector_layer(
     gdf = read_vector(path, project_crs, layer=layer, assume_crs=assume_crs)
     if name is None:
         name = path.stem if layer is None or layer == path.stem else f"{path.stem} - {layer}"
-    vector_layer = VectorLayer(name=name, source=str(path), gdf=gdf, source_layer=layer)
+    vector_layer = VectorLayer(
+        name=name,
+        source=str(path),
+        gdf=gdf,
+        source_layer=layer,
+        assumed_crs=None if assume_crs is None else normalize_crs(assume_crs),
+    )
     _ = vector_layer.paths
     return vector_layer
