@@ -18,7 +18,7 @@ uv run python scripts/screenshot.py       # offscreen screenshot -> screenshots/
 ## Stack
 
 Python 3.11+ (dev pinned to 3.12), PySide6, pyqtgraph, geopandas, shapely 2, pyproj, pyogrio, rasterio,
-lasio, numpy, pandas, openpyxl. Tests: pytest + pytest-qt. Lint/format: ruff. Deps: uv + pyproject.toml.
+lasio, numpy, pandas, openpyxl, pyarrow (fast Arrow vector reads). Tests: pytest + pytest-qt. Lint/format: ruff. Deps: uv + pyproject.toml.
 
 ## Architecture rules
 
@@ -32,6 +32,15 @@ lasio, numpy, pandas, openpyxl. Tests: pytest + pytest-qt. Lint/format: ruff. De
 - Large rasters are read downsampled with rasterio `out_shape`. Never load a full-resolution raster for display.
 - Project files are JSON (`.pgis`) and store layer sources, styles, order and CRS. Data stays in the original files
   or a GeoPackage. Paths are stored relative to the project file when possible.
+- `Project.layers[0]` is the topmost layer, matching the layer panel order. Project changes go out as
+  `ProjectEvent`s through `Project.subscribe` (plain callbacks). The UI bridges them to Qt signals.
+- The project CRS can only change while the project is empty. Reprojecting loaded layers is a
+  planned extension.
+- Readers raise `io.errors.DataReadError`, whose message is shown to the user as-is.
+  `MissingCRSError` means the UI should ask the user for a CRS. KML is always read as EPSG:4326.
+- Raster reads are stateless: each call opens and closes the file, so they are safe from worker
+  threads. `read_raster_view` never upsamples beyond native resolution, and warps with a
+  `WarpedVRT` when the raster CRS differs from the project CRS.
 - `analysis/` holds Phase 2+ algorithms. They take and return core objects and never import Qt.
 - The synthetic demo field generator lives in `petrogis/sample_data.py` (Qt-free).
   `scripts/make_sample_data.py` is a thin CLI around it, and tests use the session fixture `sample_field`

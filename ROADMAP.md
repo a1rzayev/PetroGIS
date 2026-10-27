@@ -6,7 +6,7 @@
       offscreen screenshot script, architecture/startup tests, CLAUDE.md, ROADMAP.md
 - [x] M1 — Sample data generator: field boundary (GeoJSON), ~10 wells (CSV/XLSX), synthetic LAS,
       anticline structure-top GeoTIFF, all in UTM 39N
-- [ ] M2 — Core + IO: Project, layers, styles, CRS reprojection, NaN-path geometry, vector readers
+- [x] M2 — Core + IO: Project, layers, styles, CRS reprojection, NaN-path geometry, vector readers
       (SHP/GeoJSON/GPKG/KML), downsampled raster reads
 - [ ] M3 — Map canvas: pan, wheel/box zoom, zoom to layer/extent, cursor coords; layer panel
       (visibility, reorder, rename, remove); vector + raster rendering and style dialogs; background loading
